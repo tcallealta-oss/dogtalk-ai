@@ -1,5 +1,5 @@
 /* DogTalk AI — Service Worker (offline-first para el shell de la app) */
-const CACHE = 'dogtalk-v1';
+const CACHE = 'dogtalk-v2';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './manifest.json',
   './icon-192.png', './icon-512.png', './icon-maskable.png'
@@ -33,7 +33,20 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Shell propio: cache primero
+  // Código de la app (HTML/CSS/JS): red primero para recibir actualizaciones al instante,
+  // cache como respaldo offline. Los assets estáticos van por cache primero.
+  const isCode = /\.(html|css|js)$/.test(url.pathname) || url.pathname.endsWith('/');
+  if (isCode) {
+    e.respondWith(
+      fetch(request).then(res => {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put(request, copy)).catch(() => {});
+        return res;
+      }).catch(() => caches.match(request))
+    );
+    return;
+  }
+
   e.respondWith(
     caches.match(request).then(hit => hit || fetch(request).then(res => {
       const copy = res.clone();

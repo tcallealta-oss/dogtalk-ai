@@ -27,7 +27,23 @@
     <span style="--d:5s;--x:45%">🐾</span>
   </div>
   <div class="onboard-content">
-    <div class="mascot" id="mascot">🐶</div>
+    <div class="mascot" id="mascot">
+      <svg viewBox="0 0 200 200" class="dog-svg">
+        <ellipse cx="100" cy="178" rx="52" ry="9" fill="rgba(0,0,0,.18)"/>
+        <g class="dog-ear-l"><path d="M46 62 C24 48 18 88 30 112 C40 132 60 128 64 108 Z" fill="#8B5E3C"/></g>
+        <g class="dog-ear-r"><path d="M154 62 C176 48 182 88 170 112 C160 132 140 128 136 108 Z" fill="#8B5E3C"/></g>
+        <ellipse cx="100" cy="108" rx="62" ry="58" fill="#D9A066"/>
+        <ellipse cx="100" cy="132" rx="40" ry="32" fill="#F2D0A4"/>
+        <g class="dog-eyes">
+          <ellipse cx="76" cy="98" rx="10" ry="11" fill="#3D2C29"/>
+          <ellipse cx="124" cy="98" rx="10" ry="11" fill="#3D2C29"/>
+          <circle cx="79" cy="94" r="3.6" fill="#fff"/><circle cx="127" cy="94" r="3.6" fill="#fff"/>
+        </g>
+        <path d="M88 124 Q100 116 112 124 Q100 136 88 124 Z" fill="#3D2C29"/>
+        <path d="M100 134 L100 142 M100 142 Q88 152 80 144 M100 142 Q112 152 120 144" stroke="#3D2C29" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <g class="dog-tongue"><path d="M92 148 Q100 168 108 148 Z" fill="#FF8FA3"/></g>
+      </svg>
+    </div>
     <h1>DogTalk <span class="ai-badge">AI</span></h1>
     <p class="tagline">Aprende el lenguaje único de tu perro</p>
     <div class="onboard-cards">
@@ -316,10 +332,63 @@
   </div>
 </section>
 
+<!-- MI CUENTA -->
+<section id="screen-account" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('settings')">←</button><h2>Mi cuenta</h2></header>
+  <div class="content">
+    <div class="acc-hero">
+      <div class="acc-avatar" id="accAvatar">T</div>
+      <div class="acc-id">
+        <p class="acc-name" id="accName">Tomás Callealta</p>
+        <p class="acc-mail" id="accMail">t.callealta@gmail.com</p>
+      </div>
+      <span class="acc-plan-pill" id="accPlanPill">Gratuito</span>
+    </div>
+
+    <h3 class="section-title">Suscripción</h3>
+    <div class="sub-card" id="subCard"></div>
+
+    <h3 class="section-title">Método de pago</h3>
+    <div id="payMethod"></div>
+
+    <h3 class="section-title">Historial de facturación</h3>
+    <div id="billingList" class="vac-list"></div>
+
+    <h3 class="section-title">Cuenta</h3>
+    <div class="setting-row" onclick="App.exportData()"><span>📦 Descargar mis datos</span><span>›</span></div>
+    <div class="setting-row danger" onclick="App.cancelSub()"><span>✖️ Cancelar suscripción</span><span>›</span></div>
+  </div>
+</section>
+
+<!-- SHEET: método de pago -->
+<div class="sheet-backdrop" id="payBackdrop" hidden onclick="App.closePaySheet()"></div>
+<div class="sheet" id="paySheet" hidden>
+  <div class="sheet-handle"></div>
+  <h3>Método de pago</h3>
+  <p class="sheet-sub">Serás redirigido a la pasarela segura para ingresar tus datos</p>
+  <div class="pay-options">
+    <button class="pay-opt" onclick="App.linkCard('webpay')">
+      <span class="po-ico">🏦</span>
+      <div><b>Webpay Plus</b><small>Débito y crédito · pesos chilenos</small></div><span>›</span>
+    </button>
+    <button class="pay-opt" onclick="App.linkCard('mercadopago')">
+      <span class="po-ico">💳</span>
+      <div><b>Mercado Pago</b><small>Tarjetas y saldo</small></div><span>›</span>
+    </button>
+    <button class="pay-opt" onclick="App.linkCard('stripe')">
+      <span class="po-ico">🌎</span>
+      <div><b>Stripe</b><small>Tarjeta internacional · USD</small></div><span>›</span>
+    </button>
+  </div>
+  <p class="pay-secure">🔒 DogTalk AI nunca almacena el número completo de tu tarjeta. Los datos se procesan y guardan en la pasarela certificada PCI-DSS.</p>
+  <button class="btn-ghost" onclick="App.closePaySheet()">Cancelar</button>
+</div>
+
 <!-- CONFIGURACIÓN -->
 <section id="screen-settings" class="screen">
   <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Configuración</h2></header>
   <div class="content">
+    <div class="setting-row" onclick="App.go('account')"><span>👤 Mi cuenta y suscripción</span><span>›</span></div>
     <div class="setting-row" onclick="App.go('petform')"><span>🐶 Editar perfil de mascota</span><span>›</span></div>
     <div class="setting-row"><span>🔔 Notificaciones</span><label class="switch"><input type="checkbox" id="setNotif" checked><span class="slider"></span></label></div>
     <div class="setting-row"><span>🎙️ Escucha automática al abrir</span><label class="switch"><input type="checkbox" id="setAutoListen"><span class="slider"></span></label></div>

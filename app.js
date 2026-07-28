@@ -111,9 +111,21 @@ const App = {
     document.getElementById('planTotal').textContent=`CLP $${clp.toLocaleString('es-CL')}/mes`+(e?` · ${e+1} mascotas`:'');
   },
   subscribe(plan){
-    this.state.plan=plan; this.save(); this.renderPlan();
-    this.toast(plan==='premium'?'Premium activado (demo) ⭐':'Plan Familiar activado (demo) 👨‍👩‍👧');
-    alert('Demo: aquí se integra el pago (Webpay/MercadoPago para CLP, Stripe para USD).\n\nPlan: '+plan+'\nMascotas extra: '+(this.state.extraPets||0)+' × USD $5');
+    const a=this.account();
+    if(!a.card){
+      this._pendingPlan=plan;
+      this.toast('Primero asocia un método de pago 💳');
+      this.go('account'); setTimeout(()=>this.openPaySheet(),350); return;
+    }
+    this.state.plan=plan; this.save();
+    const total=this.planTotalCLP();
+    const nd=new Date(); nd.setMonth(nd.getMonth()+1);
+    a.nextCharge=nd.getTime(); a.autoRenew=true; a.canceledAt=null;
+    const extra=this.state.extraPets||0;
+    a.invoices.push({ts:Date.now(), clp:total,
+      desc:`${this.PLANS[plan].name}${extra?` + ${extra} mascota(s) extra`:''} · ${a.card.brand} ••••${a.card.last4}`});
+    this.save(); this.renderPlan(); this.confetti();
+    this.toast(`${this.PLANS[plan].name} activado ⭐ Se renueva el ${nd.toLocaleDateString('es-CL')}`);
   },
   save(){ localStorage.setItem('dogtalk', JSON.stringify(this.state)); },
 
@@ -128,6 +140,7 @@ const App = {
     if(name==='vet') this.renderVet();
     if(name==='health') this.renderHealth();
     if(name==='subscription') this.renderPlan();
+    if(name==='account') this.renderAccount();
     const ps=document.getElementById('petSwitch');
     if(ps&&name!=='home'){ ps.hidden=true; document.getElementById('switchCaret').classList.remove('open'); }
     window.scrollTo(0,0);
@@ -185,7 +198,7 @@ const App = {
     this.renderPrediction();
     this.renderAlerts();
     const feed = document.getElementById('recentEvents');
-    feed.innerHTML = this.state.events.slice(-5).reverse().map(e=>this.eventHTML(e)).join('') || '<p class="empty">Aún no hay eventos. ¡Registra el primero!</p>';
+    feed.innerHTML = this.state.events.slice(-5).reverse().map(e=>this.eventHTML(e)).join('') || this.emptyIllu('Aún no hay eventos.<br>Toca 🎙️ Escuchar o registra el primero.');
   },
 
   renderAlerts(){
@@ -225,7 +238,7 @@ const App = {
   renderHistory(filter){
     document.querySelectorAll('#histFilter .chip').forEach(c=>c.classList.toggle('sel', c.dataset.v===filter));
     const list = this.state.events.filter(e=>filter==='todos'||e.type===filter).slice().reverse();
-    document.getElementById('historyList').innerHTML = list.map(e=>this.eventHTML(e)).join('') || '<p class="empty">Sin eventos con este filtro.</p>';
+    document.getElementById('historyList').innerHTML = list.map(e=>this.eventHTML(e)).join('') || this.emptyIllu('Sin eventos con este filtro.');
   },
 
   /* ---------- IA: predicción de significado (aprendizaje por perro) ---------- */
@@ -290,7 +303,7 @@ const App = {
   applyLabel(meaning){
     if(this._labelTarget){
       const e=this.state.events.find(x=>x.id===this._labelTarget);
-      if(e){ e.meaning=meaning; this.save(); this.toast(`¡Gracias! La IA de ${this.state.pet?this.state.pet.name:'tu perro'} aprendió 🧠`); }
+      if(e){ e.meaning=meaning; this.save(); this.confetti(); this.toast(`¡Gracias! La IA de ${this.state.pet?this.state.pet.name:'tu perro'} aprendió 🧠`); }
     } else {
       const ts=Date.now();
       this.state.events.push({id:ts,ts,type:'ladrido',conf:null,pred:null,meaning}); this.save();
@@ -377,6 +390,131 @@ const App = {
   simulateDetection(){
     const types=['ladrido','ladrido','gemido','gruñido','aullido'];
     this.addEvent(types[Math.floor(Math.random()*types.length)], 0.55+Math.random()*0.4);
+  },
+
+  /* ══════ CUENTA · SUSCRIPCIÓN · PAGO ══════
+     La app NO almacena datos de tarjeta: solo el token y los últimos 4 dígitos
+     que devuelve la pasarela (Webpay/Mercado Pago/Stripe). */
+  PLANS:{
+    free:     {name:'Gratuito', clp:0,    ico:'🐾', pets:1},
+    premium:  {name:'Premium',  clp:4990, ico:'⭐', pets:1},
+    familiar: {name:'Familiar', clp:8990, ico:'👨‍👩‍👧', pets:3},
+  },
+  EXTRA_CLP:4700, EXTRA_USD:5,
+  account(){
+    if(!this.state.account) this.state.account={
+      name:'Tomás Callealta', email:'t.callealta@gmail.com',
+      card:null, autoRenew:true, since:Date.now(), invoices:[]
+    };
+    return this.state.account;
+  },
+  planTotalCLP(){
+    const p=this.PLANS[this.state.plan]||this.PLANS.free;
+    return p.clp + (this.state.plan==='free'?0:(this.state.extraPets||0)*this.EXTRA_CLP);
+  },
+  nextChargeDate(){
+    const a=this.account();
+    if(a.nextCharge) return a.nextCharge;
+    const d=new Date(); d.setMonth(d.getMonth()+1);
+    return d.getTime();
+  },
+  renderAccount(){
+    const a=this.account(), plan=this.PLANS[this.state.plan]||this.PLANS.free;
+    const paid=this.state.plan!=='free';
+    document.getElementById('accName').textContent=a.name;
+    document.getElementById('accMail').textContent=a.email;
+    document.getElementById('accAvatar').textContent=(a.name||'?').trim()[0].toUpperCase();
+    const pill=document.getElementById('accPlanPill');
+    pill.textContent=plan.name; pill.className='acc-plan-pill'+(paid?' paid':'');
+
+    // suscripción
+    const total=this.planTotalCLP();
+    const extra=this.state.extraPets||0;
+    const nd=new Date(this.nextChargeDate());
+    document.getElementById('subCard').className='sub-card'+(paid?' active':'');
+    document.getElementById('subCard').innerHTML=`
+      <div class="sub-top"><span class="st-ico">${plan.ico}</span>
+        <div><p class="sub-plan">${plan.name}</p>
+        <p class="sub-price">${paid?`CLP $${total.toLocaleString('es-CL')} / mes`:'Sin costo · 1 mascota · 20 grabaciones al mes'}</p></div>
+      </div>
+      <div class="sub-rows">
+        <div class="sub-row"><span>Mascotas incluidas</span><span>${plan.pets}${extra?` + ${extra} extra`:''}</span></div>
+        ${extra?`<div class="sub-row"><span>Mascotas adicionales</span><span>${extra} × USD $${this.EXTRA_USD} (CLP $${(extra*this.EXTRA_CLP).toLocaleString('es-CL')})</span></div>`:''}
+        <div class="sub-row"><span>Estado</span><span style="color:${paid?'#177E72':'var(--sub)'}">${paid?'● Activa':'○ Plan gratuito'}</span></div>
+        ${paid?`<div class="sub-row"><span>${a.autoRenew?'Se renueva el':'Vence el'}</span><span>${nd.toLocaleDateString('es-CL',{day:'2-digit',month:'long',year:'numeric'})}</span></div>`:''}
+      </div>
+      ${paid?`<div class="renew-box">
+        <span style="font-size:22px">🔄</span>
+        <div class="rb-txt"><b>Renovación automática</b>
+        <small>${a.autoRenew?`Se cobrará CLP $${total.toLocaleString('es-CL')} el ${nd.toLocaleDateString('es-CL')} y cada mes.`:'Tu plan terminará en la fecha indicada y no se cobrará de nuevo.'}</small></div>
+        <label class="switch"><input type="checkbox" id="renewTgl" ${a.autoRenew?'checked':''}><span class="slider"></span></label>
+      </div>`:`<button class="btn-primary" style="margin-top:14px" onclick="App.go('subscription')">Ver planes ⭐</button>`}`;
+    const tgl=document.getElementById('renewTgl');
+    if(tgl) tgl.onchange=()=>{
+      a.autoRenew=tgl.checked; this.save(); this.renderAccount();
+      this.toast(tgl.checked?'Renovación automática activada 🔄':'Renovación automática desactivada');
+    };
+
+    // método de pago
+    const pm=document.getElementById('payMethod');
+    pm.innerHTML = a.card ? `
+      <div class="card-chip">
+        <div class="cc-top"><span class="cc-brand">${a.card.brand}</span><span style="font-size:20px">${a.card.ico}</span></div>
+        <div class="cc-num">•••• •••• •••• ${a.card.last4}</div>
+        <div class="cc-bot">
+          <div><p class="cc-lbl">Titular</p><p class="cc-val">${a.card.holder}</p></div>
+          <div><p class="cc-lbl">Vence</p><p class="cc-val">${a.card.exp}</p></div>
+        </div>
+      </div>
+      <div class="cc-actions">
+        <button onclick="App.openPaySheet()">Cambiar tarjeta</button>
+        <button onclick="App.removeCard()">Eliminar</button>
+      </div>`
+      : `<div class="no-card"><p>💳 No hay un método de pago asociado</p>
+         <button class="btn-primary" onclick="App.openPaySheet()">Agregar método de pago</button></div>`;
+
+    // facturación
+    const bl=document.getElementById('billingList');
+    bl.innerHTML = a.invoices.length ? a.invoices.slice().reverse().map(i=>`
+      <div class="bill-row">
+        <span style="font-size:20px">🧾</span>
+        <div class="br-info"><p class="br-date">${new Date(i.ts).toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'})}</p>
+        <p class="br-desc">${i.desc}</p></div>
+        <div style="text-align:right"><p class="br-amt">$${i.clp.toLocaleString('es-CL')}</p>
+        <span class="bill-badge">Pagado</span></div>
+      </div>`).join('') : this.emptyIllu('Aún no hay cobros.<br>Tu historial aparecerá aquí.');
+  },
+  openPaySheet(){ document.getElementById('payBackdrop').hidden=false; document.getElementById('paySheet').hidden=false; },
+  closePaySheet(){ document.getElementById('payBackdrop').hidden=true; document.getElementById('paySheet').hidden=true; },
+  linkCard(gateway){
+    this.closePaySheet();
+    const names={webpay:'Webpay Plus',mercadopago:'Mercado Pago',stripe:'Stripe'};
+    this.toast(`Abriendo ${names[gateway]}… 🔒`);
+    setTimeout(()=>{
+      // DEMO: en producción aquí vuelve el token + últimos 4 dígitos desde la pasarela
+      const brands=[['Visa','💠'],['Mastercard','🔴'],['American Express','🟦']];
+      const [brand,ico]=brands[Math.floor(Math.random()*brands.length)];
+      const a=this.account();
+      a.card={gateway, brand, ico, last4:String(Math.floor(1000+Math.random()*9000)),
+        holder:a.name.toUpperCase(), exp:`${String(1+Math.floor(Math.random()*12)).padStart(2,'0')}/2${8+Math.floor(Math.random()*2)}`,
+        token:'tok_demo_'+Math.random().toString(36).slice(2,10)};
+      this.save(); this.renderAccount();
+      this.toast(`Tarjeta ${brand} •••• ${a.card.last4} asociada ✅`);
+      this.confetti();
+      if(this._pendingPlan){ const p=this._pendingPlan; this._pendingPlan=null; setTimeout(()=>this.subscribe(p),700); }
+    },900);
+  },
+  removeCard(){
+    if(!confirm('¿Eliminar el método de pago? Si tienes una suscripción activa, no podrá renovarse.')) return;
+    const a=this.account(); a.card=null; a.autoRenew=false; this.save(); this.renderAccount();
+    this.toast('Método de pago eliminado');
+  },
+  cancelSub(){
+    if(this.state.plan==='free'){ this.toast('No tienes una suscripción activa'); return; }
+    if(!confirm('¿Cancelar tu suscripción?\n\nMantendrás el acceso hasta el final del período ya pagado y luego volverás al plan Gratuito.')) return;
+    const a=this.account(); a.autoRenew=false; a.canceledAt=Date.now(); this.save();
+    this.renderAccount();
+    this.toast('Suscripción cancelada. Tienes acceso hasta el fin del período.');
   },
 
   /* ══════ VET IA — chat contextual ══════
@@ -567,7 +705,7 @@ ${p.medical?`<br>• Antecedentes: ${p.medical}`:''}
           <p class="vi-meta">Aplicada ${new Date(v.date+'T12:00:00').toLocaleDateString('es-CL')}${nd?` · próxima ${new Date(nd).toLocaleDateString('es-CL')}`:''}${v.vet?' · '+v.vet:''}</p></div>
           <span class="vac-badge ${s.cls}">${s.txt}</span>
           <button class="vi-del" onclick="App.delVac('${v.id}')">🗑️</button></div>`;
-      }).join('') : `<p class="empty">${empty}</p>`;
+      }).join('') : this.emptyIllu(empty);
     };
     render(all.filter(v=>this.VAC_TYPES[v.type]),'vacList','Sin vacunas registradas.');
     render(all.filter(v=>this.TREAT_TYPES[v.type]),'treatList','Sin tratamientos registrados.');
@@ -1194,6 +1332,33 @@ ${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<tr><td>${SOUND_TY
   },
 
   /* ---------- util ---------- */
+  confetti(){
+    const c=document.createElement('div'); c.className='confetti';
+    const cols=['#FF6B4A','#2EC4B6','#FFBF3F','#9B5DE5','#FF8FA3'];
+    for(let i=0;i<34;i++){
+      const p=document.createElement('i');
+      p.style.left=Math.random()*100+'%';
+      p.style.top=-14+Math.random()*10+'px';
+      p.style.background=cols[i%cols.length];
+      p.style.setProperty('--t',(1.5+Math.random()*1.1)+'s');
+      p.style.animationDelay=(Math.random()*.35)+'s';
+      if(i%3===0) p.style.borderRadius='50%';
+      c.appendChild(p);
+    }
+    document.body.appendChild(c);
+    setTimeout(()=>c.remove(),3200);
+  },
+  EMPTY_ILLU:`<div class="empty-illu"><svg viewBox="0 0 120 120">
+    <ellipse cx="60" cy="104" rx="30" ry="5" fill="currentColor" opacity=".18"/>
+    <ellipse cx="60" cy="66" rx="34" ry="31" fill="currentColor" opacity=".22"/>
+    <path d="M30 40 C18 32 14 56 21 70 C27 82 39 79 41 67 Z" fill="currentColor" opacity=".3"/>
+    <path d="M90 40 C102 32 106 56 99 70 C93 82 81 79 79 67 Z" fill="currentColor" opacity=".3"/>
+    <ellipse cx="60" cy="79" rx="22" ry="17" fill="currentColor" opacity=".14"/>
+    <circle cx="48" cy="60" r="4.6" fill="currentColor" opacity=".6"/>
+    <circle cx="72" cy="60" r="4.6" fill="currentColor" opacity=".6"/>
+    <path d="M53 74 Q60 69 67 74 Q60 81 53 74Z" fill="currentColor" opacity=".6"/>
+  </svg><p>__TXT__</p></div>`,
+  emptyIllu(txt){ return this.EMPTY_ILLU.replace('__TXT__',txt); },
   toast(msg){
     const t=document.getElementById('toast'); t.textContent=msg; t.hidden=false;
     clearTimeout(this._tt); this._tt=setTimeout(()=>t.hidden=true, 3200);
@@ -1252,7 +1417,8 @@ ${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<tr><td>${SOUND_TY
     // mascota interactiva
     const mascot=document.getElementById('mascot');
     if(mascot) mascot.addEventListener('click',()=>{
-      mascot.textContent=['🐶','🐕','🦮','🐩','🐕‍🦺'][Math.floor(Math.random()*5)];
+      mascot.classList.remove('happy'); void mascot.offsetWidth; mascot.classList.add('happy');
+      this.confetti();
       this.toast(['¡Guau guau! 🐾','¡Woof! ❤️','*mueve la cola* 🐕','¡Arf arf! 🎾'][Math.floor(Math.random()*4)]);
     });
     // pantalla inicial
