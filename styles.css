@@ -215,6 +215,10 @@ textarea{min-height:70px;resize:vertical}
 .event-info{flex:1}
 .event-title{font-size:14.5px;font-weight:900}
 .event-meta{font-size:12px;color:var(--sub);font-weight:700}
+.event-ac{
+  font-size:10.5px;color:var(--teal-d);font-weight:800;margin-top:3px;
+  background:rgba(46,196,182,.12);border-radius:7px;padding:2px 7px;display:inline-block;
+}
 .event-conf{
   font-size:12px;font-weight:900;color:#fff;background:linear-gradient(135deg,var(--teal),#38dcc9);
   border-radius:10px;padding:4px 9px;box-shadow:0 2px 0 var(--teal-d);

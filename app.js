@@ -230,6 +230,7 @@ const App = {
       <div class="event-info">
         <p class="event-title">${st.label}${m?' → '+m.label:''}</p>
         <p class="event-meta">${time}${e.pred&&!e.meaning?` · IA sugiere: ${MEANINGS[e.pred].label}`:''}</p>
+        ${e.ac&&e.ac.f0?`<p class="event-ac">🔬 ${this.acousticSummary(e.ac)}${e.emoLabel?` · ${e.emoLabel}`:''}</p>`:''}
       </div>
       ${e.conf?`<span class="event-conf">${Math.round(e.conf*100)}%</span>`:''}
       ${!e.meaning?`<button class="tag-btn" onclick="App.openLabelSheet(${e.id})">Etiquetar</button>`:''}
@@ -263,10 +264,20 @@ const App = {
     return {meaning:top, conf};
   },
 
-  addEvent(type, conf){
+  addEvent(type, conf, ac){
     const ts=Date.now();
-    const pred=this.predictMeaning(type, ts);
-    const e={id:ts, ts, type, conf, pred:pred.meaning, predConf:pred.conf, meaning:null};
+    let pred=this.predictMeaning(type, ts);
+    let emo=null;
+    if(ac && ac.f0!==undefined){
+      emo=this.emotionFromAcoustics(ac, type);
+      const labeled=this.state.events.filter(e=>e.type===type&&e.meaning).length;
+      // con poco historial mandan los parámetros acústicos; con datos manda lo aprendido
+      if(labeled<4 || emo.arousal>0.75 || emo.arousal<0.25){
+        pred={meaning:emo.meaning, conf:Math.max(pred.conf, 0.55+Math.abs(emo.arousal-0.5)*0.6)};
+      }
+    }
+    const e={id:ts, ts, type, conf, pred:pred.meaning, predConf:pred.conf, meaning:null,
+      ac:ac||null, valence:emo?emo.valence:null, arousal:emo?emo.arousal:null, emoLabel:emo?emo.label:null};
     this.state.events.push(e);
     // alimentar el traductor en tiempo real si está corriendo
     if(this.translating) this.transDetections.push({type, conf:conf||0.6});
@@ -382,14 +393,105 @@ const App = {
       }
       if(best){
         this.lastDetectAt=Date.now();
-        this.addEvent(YAMNET_MAP[best.name]||'ladrido', best.s);
+        const type=YAMNET_MAP[best.name]||'ladrido';
+        const ac=this.analyzeAcoustics(samples, 16000);
+        this.addEvent(type, best.s, ac);
       }
     }catch(e){ console.error('classify',e); }
   },
 
   simulateDetection(){
     const types=['ladrido','ladrido','gemido','gruñido','aullido'];
-    this.addEvent(types[Math.floor(Math.random()*types.length)], 0.55+Math.random()*0.4);
+    const t=types[Math.floor(Math.random()*types.length)];
+    const base={ladrido:[350,900],gemido:[500,1100],gruñido:[120,300],aullido:[400,800]}[t];
+    const ac={f0:Math.round(base[0]+Math.random()*(base[1]-base[0])),
+      hnr:+(0.25+Math.random()*0.6).toFixed(2), rms:+(0.02+Math.random()*0.15).toFixed(4),
+      interval:Math.random()>0.4?Math.round(300+Math.random()*1500):null, burst:1+Math.floor(Math.random()*4)};
+    this.addEvent(t, 0.55+Math.random()*0.4, ac);
+  },
+
+  /* ══════ ANÁLISIS ACÚSTICO EMOCIONAL ══════
+     Basado en literatura de bioacústica canina (Pongrácz et al.; Molnár et al.;
+     y el enfoque valencia-arousal de Beyond Discrete Categories, 2025).
+     Tres parámetros predicen el estado emocional mejor que la sola clasificación:
+       · F0 (tono fundamental): grave = amenaza/territorial · agudo = miedo/juego
+       · HNR (tonalidad): tonal = alta carga emocional · ruidoso = agresivo
+       · Ritmo (intervalo entre ladridos): rápido = alta activación
+     Se mapea a valencia (agradable↔desagradable) y arousal (calma↔excitación). */
+  acoustics:{lastBarkTs:0, intervals:[]},
+  analyzeAcoustics(samples, sampleRate){
+    const N=samples.length;
+    // — F0 por autocorrelación (rango canino útil: 150–1800 Hz) —
+    let f0=0, best=0;
+    const minLag=Math.floor(sampleRate/1800), maxLag=Math.floor(sampleRate/150);
+    let e0=0; for(let i=0;i<N;i++) e0+=samples[i]*samples[i];
+    if(e0>0.0001){
+      for(let lag=minLag;lag<=maxLag&&lag<N;lag++){
+        let s=0,e1=0;
+        for(let i=0;i<N-lag;i++){ s+=samples[i]*samples[i+lag]; e1+=samples[i+lag]*samples[i+lag]; }
+        const norm=s/(Math.sqrt(e0*e1)+1e-9);
+        if(norm>best){ best=norm; f0=sampleRate/lag; }
+      }
+    }
+    // — HNR aproximado: la calidad del pico de autocorrelación indica tonalidad —
+    const hnr=Math.max(0,Math.min(1,best));
+    // — Energía (proxy de intensidad) —
+    const rms=Math.sqrt(e0/N);
+    // — Ritmo: intervalo desde el ladrido anterior —
+    const now=Date.now(), a=this.acoustics;
+    let interval=null;
+    if(a.lastBarkTs && now-a.lastBarkTs<8000){
+      interval=now-a.lastBarkTs;
+      a.intervals.push(interval); if(a.intervals.length>8) a.intervals.shift();
+    } else a.intervals=[];
+    a.lastBarkTs=now;
+    const avgInt=a.intervals.length?a.intervals.reduce((x,y)=>x+y,0)/a.intervals.length:null;
+    return {f0:Math.round(f0), hnr:+hnr.toFixed(2), rms:+rms.toFixed(4),
+            interval:avgInt?Math.round(avgInt):null, burst:a.intervals.length+1};
+  },
+  // Mapea parámetros acústicos → valencia/arousal → significado probable
+  emotionFromAcoustics(ac, type){
+    // arousal: sube con tono agudo, ritmo rápido e intensidad
+    let arousal=0.5;
+    if(ac.f0>0){ arousal += ac.f0>700?0.28 : ac.f0>450?0.12 : -0.18; }
+    if(ac.interval!==null){ arousal += ac.interval<400?0.3 : ac.interval<900?0.14 : -0.1; }
+    arousal += Math.min(0.2, ac.rms*1.6); // intensidad: aporta, sin dominar
+    // valencia: tonal y agudo = positivo · grave y ruidoso = negativo
+    let valence=0.5;
+    valence += ac.hnr>0.6?0.18 : ac.hnr<0.35?-0.2 : 0;
+    if(ac.f0>0) valence += ac.f0>600?0.12 : ac.f0<300?-0.22 : 0;
+    if(type==='gruñido') valence-=0.3;
+    if(type==='gemido'){ valence-=0.18; arousal-=0.12; }
+    if(type==='aullido'){ arousal+=0.08; valence-=0.16; } // aullido: aislamiento/llamado
+    valence=+Math.max(0,Math.min(1,valence)).toFixed(2);
+    arousal=+Math.max(0,Math.min(1,arousal)).toFixed(2);
+    // cuadrantes del modelo circumplejo (valencia × activación)
+    let meaning, label;
+    const grave = ac.f0>0 && ac.f0<330;
+    if(valence<=0.3){                       // valencia muy negativa → amenaza o miedo
+      if(type==='gruñido'||grave){ meaning='territorio'; label='Amenaza / defensa'; }
+      else if(type==='gemido'){ meaning='dolor'; label='Malestar'; }
+      else { meaning='asustado'; label='Miedo'; }
+    }
+    else if(arousal>=0.62 && valence>0.55){ meaning='emocionado'; label='Excitación positiva'; }
+    else if(arousal>=0.62 && valence<=0.5){ meaning= type==='gruñido'?'territorio':'ansioso'; label='Tensión / alerta'; }
+    else if(arousal<=0.42 && valence<=0.45){ meaning= type==='gemido'?'dolor':'asustado'; label='Malestar'; }
+    else if(arousal<=0.42 && valence>0.55){ meaning='atencion'; label='Calma / demanda suave'; }
+    else { // zona media: el tipo de vocalización es la señal más informativa
+      if(type==='gemido'){ meaning= valence<0.5?'dolor':'atencion'; label='Demanda / incomodidad'; }
+      else if(type==='gruñido'){ meaning='territorio'; label='Advertencia'; }
+      else if(type==='aullido'){ meaning='ansioso'; label='Llamado / aislamiento'; }
+      else if(arousal>0.55){ meaning= ac.f0>500?'jugar':'salir'; label='Activación moderada'; }
+      else { meaning='atencion'; label='Demanda tranquila'; }
+    }
+    return {valence, arousal, meaning, label};
+  },
+  acousticSummary(ac){
+    const p=[];
+    if(ac.f0) p.push(`${ac.f0} Hz ${ac.f0>600?'(agudo)':ac.f0<300?'(grave)':''}`.trim());
+    if(ac.hnr) p.push(ac.hnr>0.6?'tonal':ac.hnr<0.35?'ruidoso':'mixto');
+    if(ac.interval) p.push(`ráfaga de ${ac.burst} cada ${(ac.interval/1000).toFixed(1)} s`);
+    return p.join(' · ');
   },
 
   /* ══════ CUENTA · SUSCRIPCIÓN · PAGO ══════
