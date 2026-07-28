@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#5B8DEF">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="DogTalk AI">
+<meta name="description" content="Aprende el lenguaje único de tu perro con IA: traduce ladridos, detecta ansiedad y cuida su salud.">
+<title>DogTalk AI 🐾</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ONBOARDING -->
+<section id="screen-onboarding" class="screen active">
+  <div class="floaties" aria-hidden="true">
+    <span style="--d:0s;--x:8%">🐾</span><span style="--d:2.2s;--x:78%">🦴</span>
+    <span style="--d:1.1s;--x:30%">🎾</span><span style="--d:3.4s;--x:60%">🐾</span>
+    <span style="--d:4.2s;--x:88%">❤️</span><span style="--d:2.8s;--x:15%">🦴</span>
+    <span style="--d:5s;--x:45%">🐾</span>
+  </div>
+  <div class="onboard-content">
+    <div class="mascot" id="mascot">🐶</div>
+    <h1>DogTalk <span class="ai-badge">AI</span></h1>
+    <p class="tagline">Aprende el lenguaje único de tu perro</p>
+    <div class="onboard-cards">
+      <div class="ob-card"><span>🎙️</span><p>Graba y clasifica ladridos, gemidos y gruñidos</p></div>
+      <div class="ob-card"><span>🧠</span><p>La IA aprende los patrones específicos de tu mascota</p></div>
+      <div class="ob-card"><span>🔔</span><p>Recibe alertas: "Rocky probablemente quiere salir (87%)"</p></div>
+    </div>
+    <button class="btn-primary" onclick="App.go('petform')">Comenzar</button>
+    <button class="btn-ghost" onclick="App.skipOnboarding()">Ya tengo cuenta</button>
+  </div>
+</section>
+
+<!-- REGISTRO DE MASCOTA -->
+<section id="screen-petform" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('onboarding')">←</button><h2>Tu mascota</h2></header>
+  <div class="content">
+    <div class="photo-picker" id="photoPicker" onclick="document.getElementById('petPhoto').click()">
+      <span id="photoPreview">📷</span>
+      <p>Agregar foto</p>
+    </div>
+    <input type="file" id="petPhoto" accept="image/*" hidden>
+    <label>Nombre</label><input id="petName" placeholder="Ej: Rocky">
+    <label>Raza</label><input id="petBreed" placeholder="Ej: Salchicha">
+    <div class="row2">
+      <div><label>Edad (años)</label><input id="petAge" type="number" min="0" step="0.5" placeholder="3"></div>
+      <div><label>Peso (kg)</label><input id="petWeight" type="number" min="0" step="0.1" placeholder="9.5"></div>
+    </div>
+    <label>Sexo</label>
+    <div class="chip-row" id="petSex">
+      <button class="chip" data-v="macho">♂ Macho</button>
+      <button class="chip" data-v="hembra">♀ Hembra</button>
+    </div>
+    <label>Nivel de actividad</label>
+    <div class="chip-row" id="petActivity">
+      <button class="chip" data-v="bajo">🛋️ Bajo</button>
+      <button class="chip" data-v="medio">🚶 Medio</button>
+      <button class="chip" data-v="alto">⚡ Alto</button>
+    </div>
+    <label>Historial médico (opcional)</label>
+    <textarea id="petMedical" placeholder="Vacunas, alergias, tratamientos..."></textarea>
+    <button class="btn-primary" onclick="App.savePet()">Guardar perfil 🐶</button>
+  </div>
+</section>
+
+<!-- INICIO -->
+<section id="screen-home" class="screen">
+  <header class="home-head">
+    <div class="pet-avatar" id="homeAvatar" onclick="App.togglePetSwitch()">🐶</div>
+    <div class="home-name" onclick="App.togglePetSwitch()">
+      <p class="hello">Hola, familia de</p>
+      <h2 id="homePetName">— <span class="switch-caret" id="switchCaret">▾</span></h2>
+    </div>
+    <button class="icon-btn" onclick="App.go('settings')">⚙️</button>
+  </header>
+  <div class="pet-switch" id="petSwitch" hidden></div>
+  <div class="content">
+    <div class="mood-card" id="moodCard">
+      <p class="mood-label">Estado emocional estimado</p>
+      <div class="mood-value" id="moodValue">😊 Tranquilo</div>
+      <p class="mood-sub" id="moodSub">Basado en los últimos eventos registrados</p>
+    </div>
+    <div class="daily-card" id="dailyCard">
+      <div class="daily-head"><span>📰</span><h3 id="dailyTitle">El día de tu perro</h3></div>
+      <p class="daily-text" id="dailyText">Registrando la jornada…</p>
+      <div class="daily-chips" id="dailyChips"></div>
+    </div>
+    <button class="translate-banner" onclick="App.go('translate')">
+      <span class="tb-ico">🎙️</span>
+      <span class="tb-txt">¿Qué intenta decir mi perro?<small>Traducción en tiempo real · 10 segundos</small></span>
+      <span class="tb-arrow">›</span>
+    </button>
+    <div class="predict-card" id="predictCard" onclick="App.go('stats')">
+      <span class="predict-ico">🔮</span>
+      <div><p class="predict-title">Predicción de necesidades</p><p class="predict-text" id="predictText">Aprendiendo la rutina…</p></div>
+    </div>
+    <div class="quick-grid">
+      <button class="quick" onclick="App.go('listen')"><span>🎙️</span>Escuchar</button>
+      <button class="quick" onclick="App.go('camera')"><span>📷</span>Cámara IA</button>
+      <button class="quick" onclick="App.go('vet')"><span>🩺</span>Vet IA</button>
+      <button class="quick" onclick="App.go('health')"><span>💉</span>Carnet y vacunas</button>
+      <button class="quick" onclick="App.go('absence')"><span>🏠</span>Modo Ausencia</button>
+      <button class="quick" onclick="App.openLabelSheet(null)"><span>➕</span>Registrar evento</button>
+      <button class="quick" onclick="App.go('history')"><span>📋</span>Historial</button>
+      <button class="quick" onclick="App.go('stats')"><span>📊</span>Estadísticas</button>
+    </div>
+    <h3 class="section-title">Alertas inteligentes</h3>
+    <div id="alertsList" class="alerts"></div>
+    <h3 class="section-title">Últimos eventos</h3>
+    <div id="recentEvents" class="event-list"></div>
+  </div>
+  <nav class="tabbar">
+    <button class="tab active" data-s="home">🏠<span>Inicio</span></button>
+    <button class="tab" data-s="listen">🎙️<span>Escuchar</span></button>
+    <button class="tab" data-s="stats">📊<span>Stats</span></button>
+    <button class="tab" data-s="subscription">⭐<span>Premium</span></button>
+  </nav>
+</section>
+
+<!-- ESCUCHAR -->
+<section id="screen-listen" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Detección en vivo</h2></header>
+  <div class="content listen-content">
+    <div class="listen-viz" id="listenViz">
+      <div class="pulse-ring" id="pulseRing"></div>
+      <button class="mic-btn" id="micBtn" onclick="App.toggleListen()">🎙️</button>
+    </div>
+    <p class="listen-status" id="listenStatus">Toca el micrófono para empezar a escuchar</p>
+    <div class="ai-status" id="aiStatus">Cargando modelo de IA…</div>
+    <div class="detect-feed" id="detectFeed"></div>
+    <button class="btn-ghost" onclick="App.simulateDetection()">🧪 Simular detección (demo)</button>
+  </div>
+</section>
+
+<!-- VET IA CHAT -->
+<section id="screen-vet" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Vet IA 🩺</h2></header>
+  <div class="vet-ctx" id="vetCtx"></div>
+  <div class="vet-chat" id="vetChat"></div>
+  <div class="vet-suggest" id="vetSuggest"></div>
+  <div class="vet-input">
+    <input id="vetQ" placeholder="Escribe tu consulta…" onkeydown="if(event.key==='Enter')App.vetAsk()">
+    <button onclick="App.vetAsk()">➤</button>
+  </div>
+</section>
+
+<!-- CARNET Y VACUNAS -->
+<section id="screen-health" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Carnet y vacunas 💉</h2></header>
+  <div class="content">
+    <div class="vac-status" id="vacStatus"></div>
+
+    <h3 class="section-title">Carnet vacunatorio</h3>
+    <div class="carnet-grid" id="carnetGrid"></div>
+    <input type="file" id="carnetFile" accept="image/*" hidden multiple>
+    <button class="btn-ghost carnet-add" onclick="document.getElementById('carnetFile').click()">📸 Subir foto del carnet</button>
+
+    <h3 class="section-title">Control de vacunas</h3>
+    <div id="vacList" class="vac-list"></div>
+    <button class="btn-primary" onclick="App.openVacSheet()">➕ Registrar vacuna</button>
+
+    <h3 class="section-title">Desparasitación y otros</h3>
+    <div id="treatList" class="vac-list"></div>
+    <button class="btn-ghost" onclick="App.openVacSheet('tratamiento')">➕ Registrar tratamiento</button>
+  </div>
+</section>
+
+<!-- SHEET: registrar vacuna -->
+<div class="sheet-backdrop" id="vacBackdrop" hidden onclick="App.closeVacSheet()"></div>
+<div class="sheet" id="vacSheet" hidden>
+  <div class="sheet-handle"></div>
+  <h3 id="vacSheetTitle">Registrar vacuna</h3>
+  <div class="vac-form">
+    <label>Tipo</label>
+    <select id="vacType"></select>
+    <label>Fecha de aplicación</label>
+    <input type="date" id="vacDate">
+    <label>Próxima dosis (opcional)</label>
+    <input type="date" id="vacNext">
+    <label>Veterinario / clínica (opcional)</label>
+    <input id="vacVet" placeholder="Ej: Clínica Santa Rosa">
+    <button class="btn-primary" onclick="App.saveVac()">Guardar</button>
+    <button class="btn-ghost" onclick="App.closeVacSheet()">Cancelar</button>
+  </div>
+</div>
+
+<!-- TRADUCTOR EN TIEMPO REAL -->
+<section id="screen-translate" class="screen">
+  <header class="topbar"><button class="back" onclick="App.cancelTranslate();App.go('home')">←</button><h2>Traductor 🐾</h2></header>
+  <div class="content listen-content">
+    <p class="listen-status" id="transIntro">Cuando tu perro esté vocalizando, presiona el botón.<br>Escucharé <b>10 segundos</b> y te diré qué intenta decir.</p>
+    <div class="listen-viz">
+      <div class="pulse-ring" id="transRing"></div>
+      <button class="mic-btn trans-btn" id="transBtn" onclick="App.translate()">🐾</button>
+    </div>
+    <p class="listen-status" id="transStatus"></p>
+    <div id="transResult" style="width:100%"></div>
+    <button class="btn-ghost" onclick="App.translateDemo()">🧪 Ver demo del resultado</button>
+  </div>
+</section>
+
+<!-- CÁMARA IA -->
+<section id="screen-camera" class="screen">
+  <header class="topbar"><button class="back" onclick="App.stopCamera();App.go('home')">←</button><h2>Cámara IA 📷</h2></header>
+  <div class="content cam-content">
+    <div class="cam-frame">
+      <video id="camVideo" autoplay playsinline muted></video>
+      <canvas id="camCanvas" hidden></canvas>
+      <div class="cam-overlay" id="camOverlay">Cámara apagada</div>
+    </div>
+    <p class="listen-status" id="camStatus">Apunta la cámara a tu perro y analiza su lenguaje corporal</p>
+    <button class="btn-primary" id="camBtn" onclick="App.camAction()">Encender cámara</button>
+    <div id="camResult"></div>
+  </div>
+</section>
+
+<!-- MODO AUSENCIA -->
+<section id="screen-absence" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Modo Ausencia 🏠</h2></header>
+  <div class="content listen-content">
+    <div class="abs-hero" id="absHero">🚪</div>
+    <p class="listen-status" id="absStatus">Activa este modo al salir de casa. La app escuchará a tu perro y medirá cómo reacciona a tu ausencia.</p>
+    <button class="btn-primary" id="absBtn" onclick="App.toggleAbsence()">🚶 Me voy de casa</button>
+    <div id="absLive" class="detect-feed"></div>
+    <div id="absSummary"></div>
+  </div>
+</section>
+
+<!-- HISTORIAL -->
+<section id="screen-history" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Historial de eventos</h2></header>
+  <div class="content">
+    <div class="filter-row" id="histFilter">
+      <button class="chip sel" data-v="todos">Todos</button>
+      <button class="chip" data-v="ladrido">Ladridos</button>
+      <button class="chip" data-v="gemido">Gemidos</button>
+      <button class="chip" data-v="gruñido">Gruñidos</button>
+      <button class="chip" data-v="aullido">Aullidos</button>
+    </div>
+    <div id="historyList" class="event-list"></div>
+  </div>
+</section>
+
+<!-- ESTADÍSTICAS -->
+<section id="screen-stats" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Dashboard de comportamiento</h2></header>
+  <div class="content">
+    <div class="stat-cards">
+      <div class="stat-card"><p class="stat-num" id="statTotal">0</p><p>Eventos totales</p></div>
+      <div class="stat-card"><p class="stat-num" id="statWeek">0</p><p>Esta semana</p></div>
+      <div class="stat-card"><p class="stat-num" id="statAcc">—</p><p>Precisión IA</p></div>
+    </div>
+    <h3 class="section-title">Perfil emocional</h3>
+    <div class="emo-panel">
+      <div class="emo-range" id="emoRange">
+        <button class="chip sel" data-v="7">Semana</button>
+        <button class="chip" data-v="30">Mes</button>
+      </div>
+      <div class="emo-donut-wrap">
+        <div class="emo-donut" id="emoDonut"><div class="emo-center"><span id="emoTopEmoji">🐾</span><small id="emoTopName">—</small></div></div>
+        <div class="emo-legend" id="emoLegend"></div>
+      </div>
+      <p class="emo-insight" id="emoInsight"></p>
+    </div>
+    <h3 class="section-title">Evolución emocional</h3>
+    <div class="emo-evo" id="emoEvo"></div>
+    <h3 class="section-title">Frecuencia por hora del día</h3>
+    <div class="chart" id="chartHours"></div>
+    <h3 class="section-title">Significados confirmados</h3>
+    <div class="chart-h" id="chartMeanings"></div>
+    <h3 class="section-title">Patrón semanal</h3>
+    <div class="chart" id="chartWeek"></div>
+    <button class="btn-primary report-btn" onclick="App.generateReport()">📄 Generar reporte mensual PDF</button>
+    <p class="report-hint">Ideal para llevar al veterinario · Incluido en Premium</p>
+  </div>
+</section>
+
+<!-- SUSCRIPCIÓN -->
+<section id="screen-subscription" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Planes</h2></header>
+  <div class="content">
+    <div class="plan free">
+      <h3>Gratuito</h3><p class="price">$0</p>
+      <ul><li>1 mascota</li><li>20 grabaciones al mes</li><li>Estadísticas básicas</li><li>Historial de 7 días</li></ul>
+      <button class="btn-ghost">Plan actual</button>
+    </div>
+    <div class="plan premium">
+      <div class="ribbon">Más popular</div>
+      <h3>Premium ⭐</h3><p class="price">CLP $4.990<span>/mes</span></p>
+      <ul><li>1 mascota incluida</li><li>IA avanzada + tiempo real</li><li>Historial ilimitado</li><li>Alertas inteligentes</li><li>Vet IA y carnet digital</li><li>Reportes PDF mensuales</li></ul>
+      <div class="addon">
+        <div class="addon-head"><span>🐕‍🦺</span><div><b>¿Más de un perro?</b><small>Agrega cada mascota extra por USD $5/mes (≈CLP $4.700)</small></div></div>
+        <div class="pet-counter">
+          <button onclick="App.changeExtra(-1)">−</button>
+          <div><b id="extraCount">0</b><small>extra</small></div>
+          <button onclick="App.changeExtra(1)">+</button>
+        </div>
+        <p class="addon-total">Total: <b id="planTotal">CLP $4.990/mes</b></p>
+      </div>
+      <button class="btn-primary" onclick="App.subscribe('premium')">Probar 7 días gratis</button>
+    </div>
+    <div class="plan familiar">
+      <h3>Familiar 👨‍👩‍👧</h3><p class="price">CLP $8.990<span>/mes</span></p>
+      <ul><li>Hasta 5 usuarios</li><li><b>Hasta 3 mascotas incluidas</b></li><li>Acceso compartido con la familia</li><li>Mascota extra: USD $5/mes</li></ul>
+      <button class="btn-ghost" onclick="App.subscribe('familiar')">Elegir Familiar</button>
+    </div>
+  </div>
+</section>
+
+<!-- CONFIGURACIÓN -->
+<section id="screen-settings" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Configuración</h2></header>
+  <div class="content">
+    <div class="setting-row" onclick="App.go('petform')"><span>🐶 Editar perfil de mascota</span><span>›</span></div>
+    <div class="setting-row"><span>🔔 Notificaciones</span><label class="switch"><input type="checkbox" id="setNotif" checked><span class="slider"></span></label></div>
+    <div class="setting-row"><span>🎙️ Escucha automática al abrir</span><label class="switch"><input type="checkbox" id="setAutoListen"><span class="slider"></span></label></div>
+    <div class="setting-row" onclick="App.exportData()"><span>📦 Exportar mis datos (JSON)</span><span>›</span></div>
+    <div class="setting-row danger" onclick="App.resetAll()"><span>🗑️ Borrar todos los datos</span><span>›</span></div>
+    <p class="version">DogTalk AI v0.1.0 — MVP</p>
+  </div>
+</section>
+
+<!-- SHEET: etiquetar evento -->
+<div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+<div class="sheet" id="labelSheet" hidden>
+  <div class="sheet-handle"></div>
+  <h3 id="sheetTitle">¿Qué significaba?</h3>
+  <p class="sheet-sub" id="sheetSub">Tu confirmación entrena a la IA de tu perro</p>
+  <div class="label-grid">
+    <button class="label-btn" data-m="hambre">🍖<span>Tiene hambre</span></button>
+    <button class="label-btn" data-m="salir">🚪<span>Quiere salir</span></button>
+    <button class="label-btn" data-m="jugar">🎾<span>Quiere jugar</span></button>
+    <button class="label-btn" data-m="atencion">🥺<span>Busca atención</span></button>
+    <button class="label-btn" data-m="ansioso">😰<span>Está ansioso</span></button>
+    <button class="label-btn" data-m="asustado">😨<span>Está asustado</span></button>
+    <button class="label-btn" data-m="dolor">🤕<span>Dolor/malestar</span></button>
+    <button class="label-btn" data-m="territorio">🛡️<span>Protege territorio</span></button>
+    <button class="label-btn" data-m="emocionado">🤩<span>Está emocionado</span></button>
+  </div>
+  <button class="btn-ghost" onclick="App.closeSheet()">Cancelar</button>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

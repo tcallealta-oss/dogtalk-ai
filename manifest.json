@@ -1,0 +1,23 @@
+{
+  "name": "DogTalk AI — Entiende a tu perro",
+  "short_name": "DogTalk AI",
+  "description": "Aprende el lenguaje único de tu perro con inteligencia artificial: traduce ladridos, detecta ansiedad y cuida su salud.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF6EA",
+  "theme_color": "#FF6B4A",
+  "lang": "es-CL",
+  "categories": ["lifestyle", "health", "utilities"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Traducir ladrido", "short_name": "Traducir", "url": "./index.html#translate", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Modo Ausencia", "short_name": "Ausencia", "url": "./index.html#absence", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Vet IA", "short_name": "Vet IA", "url": "./index.html#vet", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+  ]
+}

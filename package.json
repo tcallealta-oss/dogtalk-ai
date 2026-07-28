@@ -1,0 +1,20 @@
+{
+  "name": "dogtalk-ai",
+  "version": "0.5.0",
+  "description": "DogTalk AI — Aprende el lenguaje único de tu perro con IA",
+  "private": true,
+  "scripts": {
+    "start": "python -m http.server 8642",
+    "cap:init": "npx cap init \"DogTalk AI\" cl.dogtalk.app --web-dir=.",
+    "cap:add": "npx cap add android",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android",
+    "apk:debug": "cd android && gradlew.bat assembleDebug",
+    "apk:release": "cd android && gradlew.bat assembleRelease"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  }
+}
