@@ -139,6 +139,7 @@ const App = {
     if(name==='stats') this.renderStats();
     if(name==='vet') this.renderVet();
     if(name==='health') this.renderHealth();
+    if(name==='food') this.renderFood();
     if(name==='subscription') this.renderPlan();
     if(name==='account') this.renderAccount();
     const ps=document.getElementById('petSwitch');
@@ -408,6 +409,167 @@ const App = {
       hnr:+(0.25+Math.random()*0.6).toFixed(2), rms:+(0.02+Math.random()*0.15).toFixed(4),
       interval:Math.random()>0.4?Math.round(300+Math.random()*1500):null, burst:1+Math.floor(Math.random()*4)};
     this.addEvent(t, 0.55+Math.random()*0.4, ac);
+  },
+
+  /* ══════ ¿PUEDE COMER? — guía toxicológica canina ══════
+     Niveles: peligro (tóxico, urgencia) · precaucion (riesgo o solo en poca cantidad) · seguro */
+  FOODS:[
+    // ── TÓXICOS ──
+    {n:'Chocolate', k:['chocolate','cacao','bombon','brownie'], lvl:'peligro', ico:'🍫',
+     w:'Contiene teobromina, que el perro no metaboliza. Mientras más amargo, más tóxico: el chocolate negro y el cacao puro son los peores; el blanco casi no tiene.',
+     s:'Vómitos, agitación, temblores, taquicardia, convulsiones. Aparecen entre 2 y 12 h.', urg:true},
+    {n:'Xilitol (edulcorante)', k:['xilitol','xylitol','endulzante','edulcorante','chicle','sin azucar'], lvl:'peligro', ico:'🍬',
+     w:'El más peligroso de todos y el menos conocido. Está en chicles, caramelos sin azúcar, algunas mantequillas de maní y pastas dentales. Una cantidad mínima provoca caída brusca de azúcar y falla hepática.',
+     s:'Debilidad, tambaleo, vómitos y convulsiones en 15–60 min.', urg:true},
+    {n:'Uvas y pasas', k:['uva','uvas','pasa','pasas','parra'], lvl:'peligro', ico:'🍇',
+     w:'Pueden causar falla renal aguda. No se conoce la dosis segura: hay perros afectados con muy pocas unidades y otros que toleran más, así que se consideran tóxicas siempre.',
+     s:'Vómitos, decaimiento, deja de orinar. El daño renal puede tardar 24–72 h.', urg:true},
+    {n:'Cebolla, ajo, puerro y cebollín', k:['cebolla','ajo','puerro','cebollin','ciboulette','chalota'], lvl:'peligro', ico:'🧅',
+     w:'Destruyen los glóbulos rojos y provocan anemia. Es acumulativo: dosis pequeñas repetidas también dañan. Ojo con caldos, salsas y comida casera condimentada.',
+     s:'Debilidad, encías pálidas, orina oscura, respiración agitada (a los 1–5 días).', urg:true},
+    {n:'Nuez de macadamia', k:['macadamia'], lvl:'peligro', ico:'🥜',
+     w:'Causa un síndrome neurológico característico incluso en cantidades pequeñas.',
+     s:'Debilidad en patas traseras, temblores, fiebre y vómitos dentro de 12 h.', urg:true},
+    {n:'Alcohol', k:['alcohol','cerveza','vino','trago','licor'], lvl:'peligro', ico:'🍺',
+     w:'Muy tóxico incluso en sorbos. También está en la masa cruda con levadura, que fermenta dentro del estómago.',
+     s:'Desorientación, vómitos, hipotermia, depresión respiratoria.', urg:true},
+    {n:'Masa cruda con levadura', k:['masa','levadura','pan crudo'], lvl:'peligro', ico:'🥖',
+     w:'Sigue fermentando en el estómago: se expande y produce alcohol. Riesgo de torsión gástrica.',
+     s:'Abdomen hinchado y duro, arcadas sin vomitar, dolor. Es una urgencia.', urg:true},
+    {n:'Café y bebidas con cafeína', k:['cafe','cafeina','te ','energetica','bebida energetica'], lvl:'peligro', ico:'☕',
+     w:'La cafeína es un estimulante cardíaco potente para el perro.',
+     s:'Inquietud, taquicardia, temblores, convulsiones.', urg:true},
+    {n:'Huesos cocidos', k:['hueso cocido','huesos cocidos','hueso de pollo','huesos'], lvl:'peligro', ico:'🦴',
+     w:'Al cocerse se vuelven quebradizos y se astillan. Pueden perforar el esófago o el intestino. Los huesos crudos y grandes son otra cosa, pero igual requieren supervisión.',
+     s:'Arcadas, salivación, sangre en heces, dolor abdominal.', urg:true},
+    // ── PRECAUCIÓN ──
+    {n:'Palta / aguacate', k:['palta','aguacate','avocado'], lvl:'precaucion', ico:'🥑',
+     w:'La pulpa en poca cantidad rara vez intoxica al perro (la persina afecta más a aves y otros animales), pero es muy grasa y puede desencadenar pancreatitis. El carozo es el verdadero peligro: obstruye el intestino.',
+     s:'Vómitos, diarrea; si tragó el carozo, obstrucción.'},
+    {n:'Lácteos (leche, queso)', k:['leche','queso','lacteo','lacteos','yogur','yogurt','crema'], lvl:'precaucion', ico:'🥛',
+     w:'La mayoría de los perros adultos son intolerantes a la lactosa. El yogur natural sin azúcar en poca cantidad suele tolerarse; los quesos son muy grasos y salados.',
+     s:'Gases, diarrea, malestar abdominal.'},
+    {n:'Frutos secos (nueces, almendras)', k:['nuez','nueces','almendra','almendras','mani','pistacho','fruto seco'], lvl:'precaucion', ico:'🌰',
+     w:'Muy grasos (riesgo de pancreatitis) y difíciles de digerir; los enteros pueden atragantar. La macadamia es directamente tóxica. Ojo con la mantequilla de maní: revisa que no tenga xilitol.',
+     s:'Vómitos, diarrea, dolor abdominal.'},
+    {n:'Carozos y semillas (manzana, durazno, cereza)', k:['carozo','cuesco','semilla','semillas','pepa'], lvl:'precaucion', ico:'🍑',
+     w:'La fruta es segura, el carozo no: contiene compuestos cianogénicos y sobre todo puede obstruir el intestino. Retíralos siempre.',
+     s:'Atragantamiento, vómitos persistentes, obstrucción.'},
+    {n:'Sal y snacks salados', k:['sal','salado','papas fritas','snack','cecina','embutido'], lvl:'precaucion', ico:'🧂',
+     w:'El exceso de sal causa deshidratación e intoxicación por sodio. Los embutidos suman grasa y conservantes.',
+     s:'Sed intensa, vómitos, temblores en casos graves.'},
+    {n:'Tomate verde y hojas', k:['tomate','tomates'], lvl:'precaucion', ico:'🍅',
+     w:'El tomate bien maduro en poca cantidad es seguro. El verde y las hojas de la planta contienen solanina.',
+     s:'Malestar digestivo, letargo.'},
+    {n:'Comida grasa y frituras', k:['fritura','frito','grasa','tocino','manteca','asado'], lvl:'precaucion', ico:'🍟',
+     w:'Principal desencadenante de pancreatitis, sobre todo en razas predispuestas y perros con sobrepeso. Muy frecuente después de asados y fiestas.',
+     s:'Vómitos repetidos, dolor abdominal, postura encorvada, decaimiento.'},
+    // ── SEGUROS ──
+    {n:'Pan y galletas simples', k:['pan','galleta','galletas','tostada','miga'], lvl:'precaucion', ico:'🍞',
+     w:'El pan horneado simple en poca cantidad no es tóxico, pero aporta calorías vacías y puede inflar. Evita los que llevan pasas, chocolate, nueces, ajo o mucha sal, y nunca la masa cruda.',
+     s:'Gases, malestar digestivo si come mucho.'},
+    {n:'Manzana (sin semillas)', k:['manzana'], lvl:'seguro', ico:'🍎',
+     w:'Buena fuente de fibra y vitamina C. Retira semillas y centro.', s:''},
+    {n:'Plátano', k:['platano','banana'], lvl:'seguro', ico:'🍌',
+     w:'Rico en potasio. Alto en azúcar: en trozos pequeños y ocasional.', s:''},
+    {n:'Sandía y melón (sin semillas)', k:['sandia','melon'], lvl:'seguro', ico:'🍉',
+     w:'Muy hidratantes, ideales en verano. Sin cáscara ni semillas.', s:''},
+    {n:'Arándanos y frutillas', k:['arandano','arandanos','frutilla','frutillas','berries','fresa'], lvl:'seguro', ico:'🫐',
+     w:'Antioxidantes, excelentes como premio bajo en calorías.', s:''},
+    {n:'Zanahoria', k:['zanahoria'], lvl:'seguro', ico:'🥕',
+     w:'Cruda ayuda a la limpieza dental; cocida es más digerible.', s:''},
+    {n:'Zapallo / calabaza cocida', k:['zapallo','calabaza','zapallo italiano','camote','batata'], lvl:'seguro', ico:'🎃',
+     w:'Excelente para regular la digestión, tanto en diarrea como en estreñimiento. Sin azúcar ni especias.', s:''},
+    {n:'Pollo o pavo cocido sin hueso', k:['pollo','pavo','carne blanca'], lvl:'seguro', ico:'🍗',
+     w:'Proteína magra ideal. Sin sal, sin condimentos, sin piel y sin huesos.', s:''},
+    {n:'Arroz y avena cocidos', k:['arroz','avena','cereal'], lvl:'seguro', ico:'🍚',
+     w:'Base de la dieta blanda para malestar digestivo. Bien cocidos y sin sal.', s:''},
+    {n:'Huevo cocido', k:['huevo','huevos'], lvl:'seguro', ico:'🥚',
+     w:'Proteína completa. Siempre cocido: el crudo trae riesgo de salmonela.', s:''},
+    {n:'Salmón y pescado cocido', k:['salmon','pescado','atun','merluza'], lvl:'seguro', ico:'🐟',
+     w:'Omega 3 para piel y articulaciones. Cocido, sin espinas y sin sal.', s:''},
+    {n:'Poroto verde y pepino', k:['poroto verde','judia','pepino','apio','lechuga'], lvl:'seguro', ico:'🥒',
+     w:'Muy bajos en calorías: buenos premios para perros con sobrepeso.', s:''},
+  ],
+  FOOD_LVL:{
+    peligro:   {t:'No puede comerlo', c:'danger', ico:'⛔', txt:'Tóxico'},
+    precaucion:{t:'Con precaución',   c:'warn',   ico:'⚠️', txt:'Riesgoso'},
+    seguro:    {t:'Sí puede comerlo', c:'ok',     ico:'✅', txt:'Seguro'},
+  },
+  norm(t){
+    return t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
+      .replace(/[¿?¡!.,;:()"']/g,' ').replace(/\s+/g,' ').trim();
+  },
+  findFood(q){
+    const s=this.norm(q||'');
+    if(s.length<2) return null;
+    let best=null, bestScore=0;
+    for(const f of this.FOODS){
+      let score=0;
+      for(const k of f.k){
+        const kk=this.norm(k);
+        if(s===kk){ score=Math.max(score,100); continue; }                    // exacto
+        // la consulta contiene la palabra clave completa (con límites de palabra)
+        if(new RegExp(`(^|\\s)${kk.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(\\s|$)`).test(s))
+          score=Math.max(score, 80+kk.length);
+        // la clave empieza con la consulta (búsqueda parcial mientras se escribe)
+        else if(s.length>=4 && kk.startsWith(s)) score=Math.max(score, 40+s.length);
+      }
+      // nombre: solo la parte antes del paréntesis, para no confundir
+      // "manzana" con "Carozos y semillas (manzana, durazno…)"
+      const base=this.norm(f.n.split('(')[0]);
+      if(base===s) score=Math.max(score,100);
+      else if(s.length>=4 && base.startsWith(s)) score=Math.max(score,45+s.length);
+      if(score>bestScore){ bestScore=score; best=f; }
+    }
+    return bestScore>=40 ? best : null;
+  },
+  foodCard(f){
+    const L=this.FOOD_LVL[f.lvl];
+    const name=this.state.pet?this.state.pet.name:'tu perro';
+    return `<div class="food-card ${L.c}">
+      <div class="fc-head"><span class="fc-ico">${f.ico}</span>
+        <div><p class="fc-verdict">${L.ico} ${L.t}</p><p class="fc-name">${f.n}</p></div></div>
+      <p class="fc-why">${f.w}</p>
+      ${f.s?`<div class="fc-signs"><b>Señales de alarma:</b> ${f.s}</div>`:''}
+      ${f.urg?`<div class="fc-urgent">🚨 Si ${name} ya lo comió, <b>llama al veterinario de inmediato</b>. No esperes a que aparezcan síntomas ni provoques el vómito sin indicación profesional.</div>`:''}
+    </div>`;
+  },
+  searchFood(q){
+    const res=document.getElementById('foodResult');
+    const f=this.findFood(q||'');
+    if(!f){ res.innerHTML = (q||'').trim().length>=2
+      ? `<div class="food-card warn"><div class="fc-head"><span class="fc-ico">🤔</span>
+         <div><p class="fc-verdict">No lo tengo en la lista</p><p class="fc-name">"${(q||'').slice(0,30)}"</p></div></div>
+         <p class="fc-why">Ante la duda, no se lo des. Puedes preguntarle al 🩺 <b>Vet IA</b> o consultar a tu veterinario.</p></div>`
+      : '';
+      this.renderFoodBrowse(); return; }
+    res.innerHTML=this.foodCard(f);
+    document.getElementById('foodBrowse').innerHTML='';
+  },
+  renderFoodBrowse(){
+    const el=document.getElementById('foodBrowse'); if(!el) return;
+    const grp=(lvl,titulo)=>{
+      const items=this.FOODS.filter(f=>f.lvl===lvl);
+      return `<h3 class="section-title">${titulo}</h3>
+      <div class="food-grid">${items.map(f=>
+        `<button class="food-chip ${this.FOOD_LVL[lvl].c}" onclick="App.pickFood('${f.n.replace(/'/g,"\\'")}')">
+          <span>${f.ico}</span>${f.n}</button>`).join('')}</div>`;
+    };
+    el.innerHTML = grp('peligro','⛔ Nunca darle')+grp('precaucion','⚠️ Con precaución')+grp('seguro','✅ Puede comer')
+      + `<p class="food-note">Guía informativa de apoyo. Ante ingesta de un tóxico o cualquier síntoma, acude al veterinario: no reemplaza la atención profesional.</p>`;
+  },
+  pickFood(name){
+    const f=this.FOODS.find(x=>x.n===name); if(!f) return;
+    document.getElementById('foodQ').value=f.n;
+    document.getElementById('foodResult').innerHTML=this.foodCard(f);
+    document.getElementById('foodBrowse').innerHTML='';
+    window.scrollTo({top:0,behavior:'smooth'});
+  },
+  renderFood(){
+    document.getElementById('foodQ').value='';
+    document.getElementById('foodResult').innerHTML='';
+    this.renderFoodBrowse();
   },
 
   /* ══════ ANÁLISIS ACÚSTICO EMOCIONAL ══════
@@ -701,7 +863,8 @@ ${p.age&&p.age>=7?`<br><br>A los ${p.age} años conviene un alimento senior con 
     if(!this.vetHistory.length){
       this.vetSay('bot',`¡Hola! Soy el asistente veterinario de <b>${p.name}</b> 🩺<br><br>Tengo cargados su raza, edad, peso, historial médico, vacunas y su comportamiento reciente. Pregúntame lo que necesites — por ejemplo síntomas que notaste, dudas de alimentación, vacunas o conducta.`,true);
     }
-    const sug=['Lleva dos días jadeando mucho','¿Cuándo toca la próxima vacuna?','Se rasca mucho','¿Cada cuánto desparasitar?','Está comiendo menos'];
+    const sug=['¿Puede comer chocolate?','¿Puede comer palta?','¿Cuándo toca la próxima vacuna?','Se rasca mucho',
+      '¿Cada cuánto desparasitar?','Lleva dos días jadeando','¿Cuánto debe comer al día?','¿Puede comer huesos?'];
     document.getElementById('vetSuggest').innerHTML=sug.map(s=>`<button onclick="App.vetAsk('${s.replace(/'/g,"\\'")}')">${s}</button>`).join('');
   },
   vetSay(who,html,noDisc){
@@ -729,6 +892,16 @@ ${p.age&&p.age>=7?`<br><br>A los ${p.age} años conviene un alimento senior con 
     const p=this.state.pet;
     if(!p) return 'Primero crea el perfil de tu mascota para poder darte una respuesta personalizada 🐶';
     const s=q.toLowerCase();
+    if(/(puede|pueden|dar|darle|doy|damos|comer|come|comio|comió|trago|tragó|ingiri|mordio|mordió|toxic|veneno|malo|mala|permitido|prohibid|peligroso)/.test(this.norm(s))){
+      const f=this.findFood(s);
+      if(f){
+        const L=this.FOOD_LVL[f.lvl];
+        return `${L.ico} <b>${L.t}: ${f.n}</b><br><br>${f.w}`
+          + (f.s?`<br><br><b>Señales de alarma:</b> ${f.s}`:'')
+          + (f.urg?`<br><br>🚨 <b>Si ya lo comió, contacta al veterinario de inmediato.</b> No provoques el vómito sin indicación profesional.`:'')
+          + `<br><br>💡 Revisa más alimentos en 🍽️ <b>¿Puede comer?</b>`;
+      }
+    }
     const hit=this.VET_KB.find(e=>e.k.some(k=>s.includes(k)));
     if(!hit){
       const c=this.vetContext();

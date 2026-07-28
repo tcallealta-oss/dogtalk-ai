@@ -123,6 +123,7 @@
       <button class="quick" onclick="App.go('listen')"><span>🎙️</span>Escuchar</button>
       <button class="quick" onclick="App.go('camera')"><span>📷</span>Cámara IA</button>
       <button class="quick" onclick="App.go('vet')"><span>🩺</span>Vet IA</button>
+      <button class="quick" onclick="App.go('food')"><span>🍽️</span>¿Puede comer?</button>
       <button class="quick" onclick="App.go('health')"><span>💉</span>Carnet y vacunas</button>
       <button class="quick" onclick="App.go('absence')"><span>🏠</span>Modo Ausencia</button>
       <button class="quick" onclick="App.openLabelSheet(null)"><span>➕</span>Registrar evento</button>
@@ -166,6 +167,19 @@
   <div class="vet-input">
     <input id="vetQ" placeholder="Escribe tu consulta…" onkeydown="if(event.key==='Enter')App.vetAsk()">
     <button onclick="App.vetAsk()">➤</button>
+  </div>
+</section>
+
+<!-- ¿PUEDE COMER? -->
+<section id="screen-food" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>¿Puede comer? 🍽️</h2></header>
+  <div class="content">
+    <div class="food-search">
+      <span>🔍</span>
+      <input id="foodQ" placeholder="Busca un alimento… ej: chocolate, palta" oninput="App.searchFood(this.value)">
+    </div>
+    <div id="foodResult"></div>
+    <div id="foodBrowse"></div>
   </div>
 </section>
 
