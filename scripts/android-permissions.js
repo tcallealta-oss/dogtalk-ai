@@ -16,6 +16,10 @@ const PERMS = [
   'android.permission.CAMERA',
   'android.permission.POST_NOTIFICATIONS',
   'android.permission.VIBRATE',
+  // alarmas exactas: sin esto Android puede correr media hora la toma del remedio
+  'android.permission.SCHEDULE_EXACT_ALARM',
+  'android.permission.USE_EXACT_ALARM',
+  'android.permission.RECEIVE_BOOT_COMPLETED',
 ];
 
 let xml = fs.readFileSync(manifest, 'utf8');

@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#5B8DEF">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -11,9 +12,6 @@
 <meta name="apple-mobile-web-app-title" content="DogTalk AI">
 <meta name="description" content="Aprende el lenguaje único de tu perro con IA: traduce ladridos, detecta ansiedad y cuida su salud.">
 <title>DogTalk AI 🐾</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -251,6 +249,9 @@
   <div class="content">
     <div class="vac-status" id="vacStatus"></div>
 
+    <h3 class="section-title">Mi veterinario</h3>
+    <div class="vet-card" id="vetCard"></div>
+
     <div class="health-links">
       <button class="hl" onclick="App.go('meds')"><span>💊</span>Medicamentos<small id="hlMeds"></small></button>
       <button class="hl" onclick="App.go('symptoms')"><span>🤒</span>Malestares<small id="hlSym"></small></button>
@@ -347,6 +348,28 @@
   </div>
 </div>
 
+<!-- SHEET: ficha del veterinario -->
+<div class="sheet-backdrop" id="vetcBackdrop" hidden onclick="App.closeVetCard()"></div>
+<div class="sheet sheet-tall" id="vetcSheet" hidden>
+  <div class="sheet-handle"></div>
+  <h3>Mi veterinario</h3>
+  <p class="sheet-sub">Para tenerlo a un toque cuando haga falta.</p>
+  <div class="vac-form">
+    <label>Clínica o profesional</label>
+    <input id="vcName" placeholder="Ej: Clínica Veterinaria Santa Rosa">
+    <label>Teléfono</label>
+    <input id="vcPhone" type="tel" inputmode="tel" placeholder="+56 9 1234 5678">
+    <label>Dirección</label>
+    <input id="vcAddr" placeholder="Av. Providencia 1234, Santiago">
+    <label>Urgencias 24 h (si es otro número)</label>
+    <input id="vcEmerg" type="tel" inputmode="tel" placeholder="+56 2 2345 6789">
+    <label>Notas (horario, convenio, nº de ficha…)</label>
+    <textarea id="vcNotes" placeholder="Atiende de 9 a 20 h · ficha 4471"></textarea>
+    <button class="btn-primary" onclick="App.saveVetCard()">Guardar</button>
+    <button class="btn-ghost" onclick="App.closeVetCard()">Cancelar</button>
+  </div>
+</div>
+
 <!-- REGISTRO DE MALESTARES / SÍNTOMAS -->
 <section id="screen-symptoms" class="screen">
   <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Registro de salud 🤒</h2></header>
@@ -385,6 +408,11 @@
     </div>
     <label>Notas (opcional)</label>
     <textarea id="symNote" placeholder="Ej: comió pasto antes, color amarillento…"></textarea>
+    <label>Foto (opcional)</label>
+    <div class="sym-photo" id="symPhoto" onclick="document.getElementById('symPhotoFile').click()">
+      <span>📷</span><p>Agregar foto — una imagen de la herida, la cojera o la deposición vale más que la descripción en la consulta</p>
+    </div>
+    <input type="file" id="symPhotoFile" accept="image/*" capture="environment" hidden>
     <button class="btn-primary" onclick="App.saveSymptom()">Registrar</button>
     <button class="btn-ghost" onclick="App.closeSymSheet()">Cancelar</button>
   </div>
@@ -414,6 +442,15 @@
 
     <h3 class="section-title">Últimos 7 días</h3>
     <div class="meal-week" id="mealWeek"></div>
+
+    <h3 class="section-title">Saco de alimento</h3>
+    <p class="sec-sub">Con la ración diaria calculamos cuándo se acaba y te avisamos antes.</p>
+    <div class="bag-card" id="bagCard"></div>
+    <div class="meal-add">
+      <input type="number" id="bagKg" min="0.5" step="0.5" placeholder="Kilos del saco">
+      <input type="date" id="bagDate">
+      <button class="btn-primary btn-inline" onclick="App.saveBag()">Abrí uno</button>
+    </div>
   </div>
 </section>
 
@@ -632,7 +669,7 @@
     <div class="setting-row" onclick="App.exportData()"><span>📦 Exportar mis datos (JSON)</span><span>›</span></div>
     <div class="setting-row" onclick="App.logout()"><span>🚪 Cerrar sesión</span><span>›</span></div>
     <div class="setting-row danger" onclick="App.resetAll()"><span>🗑️ Borrar todos los datos</span><span>›</span></div>
-    <p class="version">DogTalk AI v1.0 — salud diaria</p>
+    <p class="version">DogTalk AI v1.1</p>
   </div>
 </section>
 

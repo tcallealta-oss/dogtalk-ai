@@ -1,5 +1,5 @@
 /* DogTalk AI — Service Worker (offline-first para el shell de la app) */
-const CACHE = 'dogtalk-v3';
+const CACHE = 'dogtalk-v4';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './manifest.json',
   './icon-192.png', './icon-512.png', './icon-maskable.png'

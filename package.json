@@ -1,6 +1,6 @@
 {
   "name": "dogtalk-ai",
-  "version": "0.5.0",
+  "version": "1.1.0",
   "description": "DogTalk AI — Aprende el lenguaje único de tu perro con IA",
   "private": true,
   "scripts": {
@@ -12,6 +12,9 @@
     "cap:open": "npx cap open android",
     "apk:debug": "cd android && gradlew.bat assembleDebug",
     "apk:release": "cd android && gradlew.bat assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/local-notifications": "^6.1.0"
   },
   "devDependencies": {
     "@capacitor/android": "^6.1.2",
