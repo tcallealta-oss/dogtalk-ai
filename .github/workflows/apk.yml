@@ -1,0 +1,69 @@
+name: APK Android
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Armar www/
+        run: node scripts/build-web.js
+
+      - name: Crear proyecto Android
+        run: npx cap add android
+
+      - name: Inyectar permisos (micrófono, cámara, notificaciones)
+        run: node scripts/android-permissions.js
+
+      - name: Sincronizar web con Android
+        run: npx cap sync android
+
+      - name: Compilar APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Renombrar APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk DogTalk-AI.apk
+
+      - name: Subir como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: DogTalk-AI-apk
+          path: DogTalk-AI.apk
+
+      - name: Publicar release descargable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="apk-$(date +%Y%m%d-%H%M)"
+          gh release create "$TAG" DogTalk-AI.apk \
+            --title "DogTalk AI — APK $(date +%d-%m-%Y)" \
+            --notes "APK de prueba lista para instalar en Android.
+
+          **Instalación:** descarga \`DogTalk-AI.apk\` desde el teléfono y ábrela. Android pedirá permitir \"instalar apps de esta fuente\" — acéptalo.
+
+          Al primer uso concede **micrófono** (detección de ladridos) y **cámara** (análisis de postura). Incluye todas las pantallas: Escuchar, Traductor, Cámara IA, Vet IA, ¿Puede comer?, Carnet y vacunas, Modo Ausencia, Estadísticas, Wrapped anual y reporte PDF."

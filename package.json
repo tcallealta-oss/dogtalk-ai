@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "start": "python -m http.server 8642",
-    "cap:init": "npx cap init \"DogTalk AI\" cl.dogtalk.app --web-dir=.",
+    "build:web": "node scripts/build-web.js",
+    "cap:init": "npx cap init \"DogTalk AI\" cl.dogtalk.app --web-dir=www",
     "cap:add": "npx cap add android",
     "cap:sync": "npx cap sync android",
     "cap:open": "npx cap open android",
