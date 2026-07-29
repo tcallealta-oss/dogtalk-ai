@@ -1,5 +1,5 @@
 /* DogTalk AI — Service Worker (offline-first para el shell de la app) */
-const CACHE = 'dogtalk-v2';
+const CACHE = 'dogtalk-v3';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './manifest.json',
   './icon-192.png', './icon-512.png', './icon-maskable.png'
@@ -13,6 +13,18 @@ self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
+  );
+});
+
+/* Al tocar una notificación (toma de medicamento, comida o micrófono encendido)
+   volvemos a la pestaña ya abierta en vez de abrir otra. */
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      for (const c of list) if ('focus' in c) return c.focus();
+      if (self.clients.openWindow) return self.clients.openWindow('./index.html');
+    })
   );
 });
 

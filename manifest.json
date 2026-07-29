@@ -18,6 +18,8 @@
   "shortcuts": [
     { "name": "Traducir ladrido", "short_name": "Traducir", "url": "./index.html#translate", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
     { "name": "Modo Ausencia", "short_name": "Ausencia", "url": "./index.html#absence", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
-    { "name": "Vet IA", "short_name": "Vet IA", "url": "./index.html#vet", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+    { "name": "Vet IA", "short_name": "Vet IA", "url": "./index.html#vet", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Medicamentos", "short_name": "Medicinas", "url": "./index.html#meds", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Registrar malestar", "short_name": "Malestar", "url": "./index.html#symptoms", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
   ]
 }

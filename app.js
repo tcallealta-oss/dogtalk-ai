@@ -42,6 +42,28 @@ const App = {
       delete this.state.carnet; delete this.state.lastAbsence; delete this.state.absence;
       this.save();
     }
+    // migración v0.9 → v1.0 (salud diaria: edad exacta, comidas, peso, síntomas, medicamentos)
+    const s=this.state;
+    s.settings=s.settings||{};
+    if(s.settings.medRem===undefined) s.settings.medRem=true;
+    if(s.settings.mealRem===undefined) s.settings.mealRem=true;
+    if(!s.settings.sensitivity) s.settings.sensitivity='media';
+    s.users=s.users||{}; s.remFired=s.remFired||{}; s.rejected=s.rejected||[]; s.fpCount=s.fpCount||{};
+    (s.pets||[]).forEach(p=>{
+      p.weights=p.weights||[]; p.symptoms=p.symptoms||[]; p.meds=p.meds||[];
+      if(!p.meals) p.meals={times:[],grams:null,log:{}};
+      // el peso del perfil pasa a ser el primer punto de la curva
+      if(!p.weights.length && parseFloat(p.weight)>0)
+        p.weights.push({id:'w'+(p.id||'')+'0', date:this.dateKey(), kg:parseFloat(p.weight)});
+      // la edad decimal antigua se conserva como años+meses aproximados
+      if(p.ageY===undefined && p.age!==undefined && p.age!=='' && p.age!==null && !p.birth){
+        const m=Math.round(parseFloat(p.age)*12);
+        if(!isNaN(m)){ p.ageY=Math.floor(m/12); p.ageM=m%12; }
+      }
+    });
+    this.seedDemo();
+    this.syncAges();
+    this.save();
   },
   // ── acceso al perro activo: el resto del código sigue usando state.pet/events/… ──
   get petIdx(){ return Math.min(this.state.activePet||0, Math.max(0,this.state.pets.length-1)); },
@@ -52,10 +74,13 @@ const App = {
       if(!P){ s.pets.push({...v,id:'p'+Date.now(),events:[],vaccines:[],carnet:[]}); s.activePet=s.pets.length-1; this.bindActive(); }
       else Object.assign(P,v);
     }});
-    ['events','vaccines','carnet','lastAbsence','absence'].forEach(k=>{
+    const ARR=['events','vaccines','carnet','weights','symptoms','meds'];
+    [...ARR,'lastAbsence','absence','meals'].forEach(k=>{
       Object.defineProperty(s,k,{configurable:true,
-        get:()=>{ if(!P) return k==='events'||k==='vaccines'||k==='carnet'?[]:null;
-                  if((k==='events'||k==='vaccines'||k==='carnet')&&!P[k]) P[k]=[]; return P[k]; },
+        get:()=>{ if(!P) return ARR.includes(k)?[]:null;
+                  if(ARR.includes(k)&&!P[k]) P[k]=[];
+                  if(k==='meals'&&!P.meals) P.meals={times:[],grams:null,log:{}};
+                  return P[k]; },
         set:v=>{ if(P) P[k]=v; }});
     });
   },
@@ -70,7 +95,7 @@ const App = {
     el.innerHTML = this.state.pets.map((p,i)=>`
       <div class="ps-item ${i===this.petIdx?'sel':''}" onclick="App.switchPet(${i})">
         <div class="ps-av">${p.photo?`<img src="${p.photo}">`:'🐶'}</div>
-        <div>${p.name}<span class="ps-meta">${[p.breed,p.age?p.age+' años':''].filter(Boolean).join(' · ')||'Sin datos'}</span></div>
+        <div>${p.name}<span class="ps-meta">${[p.breed,this.ageMonths(p)!=null?this.ageLabel(p):''].filter(Boolean).join(' · ')||'Sin datos'}</span></div>
         ${i===this.petIdx?'<span style="margin-left:auto">✓</span>':''}
       </div>`).join('') +
       `<div class="ps-add" onclick="App.addPet()">➕ Agregar otra mascota
@@ -92,8 +117,9 @@ const App = {
       this.go('subscription'); return;
     }
     this._newPet=true;
-    ['petName','petBreed','petAge','petWeight','petMedical'].forEach(id=>document.getElementById(id).value='');
-    document.querySelectorAll('#petSex .chip,#petActivity .chip').forEach(c=>c.classList.remove('sel'));
+    ['petName','petBreed','petBirth','petAgeY','petAgeM','petWeight','petMedical'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('ageHint').textContent='Si no la sabes exacta, deja el campo vacío y usa la edad aproximada.';
+    document.querySelectorAll('#petSex .chip,#petActivity .chip,#petNeutered .chip').forEach(c=>c.classList.remove('sel'));
     document.getElementById('photoPicker').innerHTML='<span>📷</span><p>Agregar foto</p>';
     this._photoData=null;
     this.go('petform');
@@ -117,20 +143,21 @@ const App = {
       this.toast('Primero asocia un método de pago 💳');
       this.go('account'); setTimeout(()=>this.openPaySheet(),350); return;
     }
-    this.state.plan=plan; this.save();
+    this.state.plan=plan; this.syncUserPlan(); this.save();
     const total=this.planTotalCLP();
     const nd=new Date(); nd.setMonth(nd.getMonth()+1);
     a.nextCharge=nd.getTime(); a.autoRenew=true; a.canceledAt=null;
     const extra=this.state.extraPets||0;
     a.invoices.push({ts:Date.now(), clp:total,
       desc:`${this.PLANS[plan].name}${extra?` + ${extra} mascota(s) extra`:''} · ${a.card.brand} ••••${a.card.last4}`});
-    this.save(); this.renderPlan(); this.confetti();
+    this.save(); this.renderPlan(); this.confetti(); this.renderTrial();
     this.toast(`${this.PLANS[plan].name} activado ⭐ Se renueva el ${nd.toLocaleDateString('es-CL')}`);
   },
   save(){ localStorage.setItem('dogtalk', JSON.stringify(this.state)); },
 
   /* ---------- navegación ---------- */
   go(name){
+    if(!this.gate(name)) return;
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById('screen-'+name).classList.add('active');
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.s===name));
@@ -140,6 +167,10 @@ const App = {
     if(name==='vet') this.renderVet();
     if(name==='health') this.renderHealth();
     if(name==='food') this.renderFood();
+    if(name==='meds') this.renderMeds();
+    if(name==='symptoms') this.renderSymptoms();
+    if(name==='meals') this.renderMeals();
+    if(name==='weight') this.renderWeight();
     if(name==='subscription') this.renderPlan();
     if(name==='account') this.renderAccount();
     const ps=document.getElementById('petSwitch');
@@ -153,24 +184,37 @@ const App = {
     const name = document.getElementById('petName').value.trim();
     if(!name){ this.toast('Ponle nombre a tu mascota 🐶'); return; }
     const sel = id => (document.querySelector(`#${id} .chip.sel`)||{}).dataset?.v || null;
+    const val = id => document.getElementById(id).value;
+    const birth = val('petBirth')||null;
+    if(birth && new Date(birth+'T12:00:00') > new Date()){ this.toast('La fecha de nacimiento no puede ser futura 📅'); return; }
+    const base = {
+      name, breed: val('petBreed').trim(), birth,
+      ageY: val('petAgeY')===''?null:+val('petAgeY'), ageM: val('petAgeM')===''?null:+val('petAgeM'),
+      weight: val('petWeight'), sex: sel('petSex'), neutered: sel('petNeutered'),
+      activity: sel('petActivity'), medical: val('petMedical').trim(),
+    };
+    base.age = this.ageYears(base);
     if(this._newPet){ // crear mascota adicional
-      this.state.pets.push({id:'p'+Date.now(), name,
-        breed:document.getElementById('petBreed').value.trim(),
-        age:document.getElementById('petAge').value, weight:document.getElementById('petWeight').value,
-        sex:sel('petSex'), activity:sel('petActivity'), medical:document.getElementById('petMedical').value.trim(),
-        photo:this._photoData||null, events:[], vaccines:[], carnet:[]});
+      this.state.pets.push({id:'p'+Date.now(), ...base,
+        photo:this._photoData||null, events:[], vaccines:[], carnet:[],
+        weights:base.weight?[{id:'w'+Date.now(), date:this.dateKey(), kg:parseFloat(base.weight)}]:[],
+        symptoms:[], meds:[], meals:{times:[],grams:null,log:{}}});
       this.state.activePet=this.state.pets.length-1;
       this._newPet=false; this._photoData=null; this.bindActive(); this.save();
       this.toast(`¡${name} agregado! Ahora tienes ${this.state.pets.length} mascotas 🐾`);
       this.go('home'); return;
     }
-    this.state.pet = {
-      name, breed: document.getElementById('petBreed').value.trim(),
-      age: document.getElementById('petAge').value, weight: document.getElementById('petWeight').value,
-      sex: sel('petSex'), activity: sel('petActivity'),
-      medical: document.getElementById('petMedical').value.trim(),
-      photo: this._photoData || (this.state.pet && this.state.pet.photo) || null,
-    };
+    const prev=this.state.pet||{};
+    this.state.pet = {...base, photo: this._photoData || prev.photo || null};
+    // si cambió el peso a mano, queda como punto nuevo de la curva
+    const kg=parseFloat(base.weight);
+    if(kg>0){
+      const list=this.state.weights, k=this.dateKey();
+      const today=list.find(w=>w.date===k);
+      const last=list.slice().sort((a,b)=>a.date.localeCompare(b.date)).pop();
+      if(today) today.kg=kg;
+      else if(!last||last.kg!==kg) list.push({id:'w'+Date.now(), date:k, kg});
+    }
     this.save(); this.toast(`¡Perfil de ${name} guardado! 🎉`); this.go('home');
   },
 
@@ -196,7 +240,9 @@ const App = {
     const wb=document.getElementById('wbName'); if(wb&&p) wb.textContent=p.name;
     document.getElementById('moodValue').textContent = mood;
     document.getElementById('moodSub').textContent = sub;
+    this.renderTrial();
     this.renderDaily();
+    this.renderAgenda();
     this.renderPrediction();
     this.renderAlerts();
     const feed = document.getElementById('recentEvents');
@@ -217,6 +263,19 @@ const App = {
     const vs=this.vacSummary();
     if(vs.cls==='danger') alerts.push(['danger','💉',`Vacunas: ${vs.text} Ve a 💉 Carnet y vacunas.`]);
     else if(vs.cls==='warn'&&(this.state.vaccines||[]).length) alerts.push(['warn','⏰',`Vacunas: ${vs.text}`]);
+    // ── salud diaria ──
+    const sv=this.symptomVerdict();
+    if(sv.level==='urgent') alerts.push(['danger','🚨',`${sv.title}. ${sv.reasons[0]||''}`]);
+    else if(sv.level==='vet') alerts.push(['warn','⚠️',`${sv.title}: ${sv.reasons[0]||''}`]);
+    const overdue=this.medDosesToday().filter(d=>d.st==='due');
+    if(overdue.length) alerts.push(['warn','💊',`${overdue.length} ${overdue.length===1?'toma atrasada':'tomas atrasadas'} hoy (${overdue.map(d=>d.med.name+' '+d.time).join(', ')}).`]);
+    const wt=this.weightTrend(30);
+    if(wt&&Math.abs(wt.pct)>=10) alerts.push(['warn','⚖️',`El peso ${wt.diff>0?'subió':'bajó'} ${Math.abs(wt.pct)}% en 30 días (${wt.from.kg} → ${wt.to.kg} kg). Vale la pena revisarlo con el veterinario.`]);
+    const mealsT=this.mealsOf(), lgT=(mealsT.log||{})[this.dateKey()]||{};
+    const nowM=new Date().getHours()*60+new Date().getMinutes();
+    const missedMeals=(mealsT.times||[]).filter(t=>!lgT[t]&&this.minOf(t)<nowM-60);
+    if(missedMeals.length) alerts.push(['info','🍲',`Sin marcar la comida de las ${missedMeals.join(' y ')}. ¿Ya comió?`]);
+    if(this.isBirthday()) alerts.push(['info','🎂',`¡Hoy ${this.state.pet.name} cumple ${Math.floor(this.ageMonths()/12)} años! 🎉`]);
     if(!alerts.length) alerts.push(['info','✅','Todo se ve normal. La IA sigue aprendiendo de '+(this.state.pet?this.state.pet.name:'tu perro')+'.']);
     el.innerHTML = alerts.map(([c,i,t])=>`<div class="alert-card ${c}"><span class="ico">${i}</span><span>${t}</span></div>`).join('');
   },
@@ -235,11 +294,38 @@ const App = {
         ${e.ac&&e.ac.f0?`<p class="event-ac">🔬 ${this.acousticSummary(e.ac)}${e.emoLabel?` · ${e.emoLabel}`:''}</p>`:''}
       </div>
       ${e.conf?`<span class="event-conf">${Math.round(e.conf*100)}%</span>`:''}
-      ${!e.meaning?`<button class="tag-btn" onclick="App.openLabelSheet(${e.id})">Etiquetar</button>`:''}
+      <div class="event-acts">
+        ${!e.meaning?`<button class="tag-btn" onclick="App.openLabelSheet(${e.id})">Etiquetar</button>`:''}
+        <button class="fp-btn" onclick="App.openFpSheet(${e.id})" title="No era mi perro">🚫 No era él</button>
+      </div>
     </div>`;
   },
+  rejectedHTML(e){
+    const st=SOUND_TYPES[e.type]||{emoji:'🎵',label:e.type};
+    const r=this.FP_REASONS[e.fp]||{e:'❓',l:'Descartado'};
+    const d=new Date(e.ts);
+    return `<div class="event-item rejected">
+      <span class="event-emoji">${r.e}</span>
+      <div class="event-info">
+        <p class="event-title">${st.label} — descartado: ${r.l}</p>
+        <p class="event-meta">${d.toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit'})} ${d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'})}${e.cls?' · clase IA: '+e.cls:''}</p>
+      </div>
+      <button class="tag-btn" onclick="App.restoreEvent(${e.id})">↩️ Restaurar</button>
+    </div>`;
+  },
+  _histFilter:'todos',
   renderHistory(filter){
+    this._histFilter=filter;
     document.querySelectorAll('#histFilter .chip').forEach(c=>c.classList.toggle('sel', c.dataset.v===filter));
+    if(filter==='descartados'){
+      const rej=(this.state.rejected||[]).slice().reverse();
+      const fp=this.state.fpCount||{};
+      const top=Object.entries(fp).sort((a,b)=>b[1]-a[1]).slice(0,3);
+      document.getElementById('historyList').innerHTML =
+        (top.length?`<div class="fp-summary">🎯 Umbral reforzado en: ${top.map(([c,n])=>`<b>${c}</b> (${n})`).join(', ')}</div>`:'')
+        + (rej.map(e=>this.rejectedHTML(e)).join('') || this.emptyIllu('No has descartado ningún sonido.<br>Usa 🚫 <b>No era él</b> cuando la IA se equivoque.'));
+      return;
+    }
     const list = this.state.events.filter(e=>filter==='todos'||e.type===filter).slice().reverse();
     document.getElementById('historyList').innerHTML = list.map(e=>this.eventHTML(e)).join('') || this.emptyIllu('Sin eventos con este filtro.');
   },
@@ -266,7 +352,7 @@ const App = {
     return {meaning:top, conf};
   },
 
-  addEvent(type, conf, ac){
+  addEvent(type, conf, ac, cls){
     const ts=Date.now();
     let pred=this.predictMeaning(type, ts);
     let emo=null;
@@ -278,7 +364,7 @@ const App = {
         pred={meaning:emo.meaning, conf:Math.max(pred.conf, 0.55+Math.abs(emo.arousal-0.5)*0.6)};
       }
     }
-    const e={id:ts, ts, type, conf, pred:pred.meaning, predConf:pred.conf, meaning:null,
+    const e={id:ts, ts, type, conf, cls:cls||null, pred:pred.meaning, predConf:pred.conf, meaning:null,
       ac:ac||null, valence:emo?emo.valence:null, arousal:emo?emo.arousal:null, emoLabel:emo?emo.label:null};
     this.state.events.push(e);
     // alimentar el traductor en tiempo real si está corriendo
@@ -337,6 +423,7 @@ const App = {
         csv.split('\n').slice(1).forEach(line=>{
           const parts=line.split(','); if(parts.length<3) return;
           const idx=+parts[0], name=parts.slice(2).join(',').replace(/"/g,'').trim();
+          this.classNames[idx]=name;
           if(YAMNET_MAP[name]) this.dogClassIdx[idx]=name;
         });
       }catch(e){ // fallback índices conocidos
@@ -352,6 +439,7 @@ const App = {
   /* ---------- escucha en vivo ---------- */
   async toggleListen(){
     if(this.listening){ this.stopListen(); return; }
+    if(!this.requirePro('La escucha en vivo')) return;
     try{
       this.stream = await navigator.mediaDevices.getUserMedia({audio:true});
     }catch(e){ this.toast('Permiso de micrófono denegado 🎙️🚫'); return; }
@@ -368,7 +456,8 @@ const App = {
     document.getElementById('micBtn').classList.add('rec');
     document.getElementById('pulseRing').classList.add('on');
     document.getElementById('listenStatus').textContent='Escuchando… deja el teléfono cerca de tu perro 🐕';
-    if(Notification && Notification.permission==='default') Notification.requestPermission();
+    if(window.Notification && Notification.permission==='default') await Notification.requestPermission();
+    this.micIndicator(true);
   },
   stopListen(){
     if(this.procNode) this.procNode.disconnect();
@@ -378,6 +467,21 @@ const App = {
     document.getElementById('micBtn').classList.remove('rec');
     document.getElementById('pulseRing').classList.remove('on');
     document.getElementById('listenStatus').textContent='Detección pausada';
+    this.micIndicator(false);
+  },
+  /* Sonidos que suelen provocar falsos positivos: TV, radio, voces, música.
+     Si alguno domina la escena por encima del sonido canino, lo más probable
+     es que el "ladrido" venga de un parlante y no del perro de la casa. */
+  DISTRACTOR_RE:/^(speech|television|radio|music|singing|conversation|narration|male speech|female speech|child speech|babbling|soundtrack|theme music|background music|musical instrument|video game music|whistling|shout|yell|children shouting|crowd|applause|laughter|chatter)/i,
+  classNames:{},
+  topDistractor(mean){
+    let top=null;
+    for(const idx in this.classNames){
+      if(!this.DISTRACTOR_RE.test(this.classNames[idx])) continue;
+      const s=mean[idx];
+      if(s>0.18 && (!top||s>top.s)) top={name:this.classNames[idx], s};
+    }
+    return top;
   },
   async classify(samples){
     if(!this.model) return;
@@ -388,16 +492,27 @@ const App = {
       const [scores]=this.model.predict(input);
       const mean=await scores.mean(0).data();
       input.dispose(); scores.dispose();
+      const thr=this.baseThreshold();
       let best=null;
       for(const idx in this.dogClassIdx){
-        const s=mean[idx];
-        if(s>0.25 && (!best||s>best.s)) best={s, name:this.dogClassIdx[idx]};
+        const name=this.dogClassIdx[idx], s=mean[idx];
+        // el umbral sube en las clases que ya marcaste como error
+        if(s > thr+this.fpBoost(name) && (!best||s>best.s)) best={s, name};
       }
       if(best){
+        // filtro anti-TV: si la fuente mediática/humana domina, descartamos
+        const dist=this.topDistractor(mean);
+        if(dist && dist.s > best.s*1.15){
+          this.lastDetectAt=Date.now();
+          const feed=document.getElementById('detectFeed');
+          if(feed) feed.insertAdjacentHTML('afterbegin',
+            `<div class="skip-item">🔇 Sonido ignorado — parecía <b>${dist.name}</b> (${Math.round(dist.s*100)}%), no ${this.state.pet?this.state.pet.name:'tu perro'}.</div>`);
+          return;
+        }
         this.lastDetectAt=Date.now();
         const type=YAMNET_MAP[best.name]||'ladrido';
         const ac=this.analyzeAcoustics(samples, 16000);
-        this.addEvent(type, best.s, ac);
+        this.addEvent(type, best.s, ac, best.name);
       }
     }catch(e){ console.error('classify',e); }
   },
@@ -415,22 +530,36 @@ const App = {
   /* ══════ CALCULADORA DE RACIÓN ══════
      Fórmula veterinaria estándar: RER = 70 × peso^0.75 ; MER = RER × factor
      El factor depende de edad, esterilización y nivel de actividad. */
-  rationAdvice(p){
-    const w=parseFloat(p.weight), age=parseFloat(p.age);
-    if(!w||w<=0) return `Para calcular la ración de ${p.name} necesito su <b>peso</b>. Agrégalo en su perfil (⚙️ → Editar perfil de mascota) y vuelve a preguntarme.
-<br><br>Como referencia general: un perro adulto come entre el <b>2% y 3% de su peso corporal</b> al día en alimento seco, repartido en 2 tomas.`;
+  // versión numérica: la usan la pantalla de comidas, la de peso y el chat
+  rationCalc(p){
+    if(!p) return null;
+    const w=parseFloat(p.weight);
+    if(!w||w<=0) return null;
+    const months=this.ageMonths(p);
+    const age = months==null ? null : months/12;
     const rer=70*Math.pow(w,0.75);
     let factor, etapa;
-    if(age&&age<0.34){ factor=3.0; etapa='cachorro menor de 4 meses'; }
-    else if(age&&age<1){ factor=2.0; etapa='cachorro de 4 a 12 meses'; }
-    else if(age&&age>=8){ factor=1.4; etapa='adulto senior'; }
+    if(age!=null&&age<0.34){ factor=3.0; etapa='cachorro menor de 4 meses'; }
+    else if(age!=null&&age<1){ factor=2.0; etapa='cachorro de 4 a 12 meses'; }
+    else if(age!=null&&age>=8){ factor=1.4; etapa='adulto senior'; }
+    // la esterilización baja el gasto energético entre un 20% y un 30%
+    else if(p.neutered==='si'){ factor=p.activity==='alto'?1.6:p.activity==='bajo'?1.2:1.4;
+      etapa=`adulto esterilizado con actividad ${({alto:'alta',bajo:'baja',medio:'media'})[p.activity]||'media'}`; }
     else if(p.activity==='alto'){ factor=1.8; etapa='adulto muy activo'; }
     else if(p.activity==='bajo'){ factor=1.4; etapa='adulto poco activo'; }
     else { factor=1.6; etapa='adulto con actividad media'; }
     const mer=Math.round(rer*factor);
     // alimento seco típico: 3.500–4.000 kcal/kg → usamos 3.700 kcal/kg = 3,7 kcal/g
-    const gr=Math.round(mer/3.7);
-    const tomas=(age&&age<0.5)?4:(age&&age<1)?3:2;
+    const grams=Math.round(mer/3.7);
+    const tomas=(age!=null&&age<0.5)?4:(age!=null&&age<1)?3:2;
+    return {w, rer:Math.round(rer), mer, grams, tomas, factor, etapa,
+      perMeal:Math.round(grams/tomas), stage:this.lifeStage(p)};
+  },
+  rationAdvice(p){
+    const r=this.rationCalc(p);
+    if(!r) return `Para calcular la ración de ${p.name} necesito su <b>peso</b>. Agrégalo en su perfil (⚙️ → Editar perfil de mascota) y vuelve a preguntarme.
+<br><br>Como referencia general: un perro adulto come entre el <b>2% y 3% de su peso corporal</b> al día en alimento seco, repartido en 2 tomas.`;
+    const {w, rer, mer, grams:gr, tomas, factor, etapa}=r;
     return `Para <b>${p.name}</b> (${w} kg, ${etapa}):
 <br><br>🔥 <b>Necesidad energética:</b> ~${mer} kcal al día
 <br>🥣 <b>Alimento seco:</b> aproximadamente <b>${gr} g diarios</b>, repartidos en <b>${tomas} tomas</b> (~${Math.round(gr/tomas)} g por comida)
@@ -937,17 +1066,23 @@ ${p.breed&&/bulldog|pug|boxer|shih|pekines|braquic/i.test(p.breed)?`<br><br>⚠�
     const recent=this.state.events.filter(e=>e.ts>=week);
     const {cnt,total}=this.emoDistribution(7);
     const topEmo=Object.entries(cnt).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1])[0];
+    const sv=this.symptomVerdict();
     return {p, recent:recent.length,
       topEmo: topEmo?this.EMOS[topEmo[0]].label:null,
       tension: total?Math.round((cnt.ansioso+cnt.estresado)/total*100):0,
-      pain: recent.filter(e=>(e.meaning||e.pred)==='dolor').length};
+      pain: recent.filter(e=>(e.meaning||e.pred)==='dolor').length,
+      age: this.ageLabel(p), stage: this.lifeStage(p),
+      meds: (this.state.meds||[]).filter(m=>this.medIsActive(m)),
+      symptoms: (this.state.symptoms||[]).filter(s=>s.ts>=week),
+      verdict: sv,
+      weight: this.weightTrend(30)};
   },
   renderVet(){
     const c=this.vetContext();
     const ctxEl=document.getElementById('vetCtx');
     if(!c){ ctxEl.textContent='Crea el perfil de tu mascota para respuestas personalizadas.'; return; }
     const p=c.p;
-    ctxEl.innerHTML=`🔎 <b>Contexto cargado:</b> ${p.name}${p.breed?', '+p.breed:''}${p.age?', '+p.age+' años':''}${p.weight?', '+p.weight+' kg':''} · ${c.recent} eventos esta semana${c.topEmo?' · estado dominante: '+c.topEmo:''}${c.tension?' · tensión '+c.tension+'%':''}`;
+    ctxEl.innerHTML=`🔎 <b>Contexto cargado:</b> ${p.name}${p.breed?', '+p.breed:''}, ${c.age} (${c.stage.label})${p.weight?', '+p.weight+' kg':''}${p.neutered==='si'?', esterilizado/a':''} · ${c.recent} eventos esta semana${c.topEmo?' · estado dominante: '+c.topEmo:''}${c.tension?' · tensión '+c.tension+'%':''}${c.meds.length?' · 💊 '+c.meds.map(m=>m.name).join(', '):''}${c.symptoms.length?' · 🤒 '+c.symptoms.length+' malestar(es) esta semana':''}`;
     if(!this.vetHistory.length){
       this.vetSay('bot',`¡Hola! Soy el asistente veterinario de <b>${p.name}</b> 🩺<br><br>Tengo cargados su raza, edad, peso, historial médico, vacunas y su comportamiento reciente. Pregúntame lo que necesites — por ejemplo síntomas que notaste, dudas de alimentación, vacunas o conducta.`,true);
     }
@@ -1000,9 +1135,12 @@ ${p.breed&&/bulldog|pug|boxer|shih|pekines|braquic/i.test(p.breed)?`<br><br>⚠�
     if(!hit){
       const c=this.vetContext();
       return `No tengo una guía específica para esa consulta, pero puedo orientarte con lo que sé de <b>${p.name}</b>:
-<br><br>• ${p.breed||'Raza no registrada'}${p.age?`, ${p.age} años`:''}${p.weight?`, ${p.weight} kg`:''}
+<br><br>• ${p.breed||'Raza no registrada'}, ${c.age} (${c.stage.label})${p.weight?`, ${p.weight} kg`:''}
 <br>• ${c.recent} vocalizaciones esta semana${c.topEmo?`, estado dominante <b>${c.topEmo}</b>`:''}
 ${c.pain?`<br>• ⚠️ ${c.pain} evento(s) asociados a posible dolor`:''}
+${c.symptoms.length?`<br>• 🤒 Malestares registrados: ${[...new Set(c.symptoms.map(s=>this.SYMPTOMS[s.type].l))].join(', ')}`:''}
+${c.meds.length?`<br>• 💊 En tratamiento: ${c.meds.map(m=>`${m.name}${m.dose?' ('+m.dose+')':''}`).join(', ')}`:''}
+${c.weight&&Math.abs(c.weight.pct)>=5?`<br>• ⚖️ El peso ${c.weight.diff>0?'subió':'bajó'} ${Math.abs(c.weight.pct)}% en 30 días`:''}
 ${p.medical?`<br>• Antecedentes: ${p.medical}`:''}
 <br><br>Cuéntame con más detalle qué observaste (desde cuándo, con qué frecuencia, si hay otros signos) y te oriento mejor. También puedes generar el 📄 <b>reporte mensual</b> desde Estadísticas para llevarlo a la consulta.`;
     }
@@ -1078,6 +1216,16 @@ ${p.medical?`<br>• Antecedentes: ${p.medical}`:''}
     };
     render(all.filter(v=>this.VAC_TYPES[v.type]),'vacList','Sin vacunas registradas.');
     render(all.filter(v=>this.TREAT_TYPES[v.type]),'treatList','Sin tratamientos registrados.');
+    // accesos rápidos con su estado actual
+    const act=(this.state.meds||[]).filter(m=>this.medStatus(m)==='active').length;
+    const sv=this.symptomVerdict();
+    const w=(this.state.weights||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)).pop();
+    const meals=this.mealsOf();
+    const set=(id,txt)=>{ const e=document.getElementById(id); if(e) e.textContent=txt; };
+    set('hlMeds', act?`${act} activo${act>1?'s':''}`:'ninguno');
+    set('hlSym', sv.level==='ok'?'sin novedad':sv.level==='watch'?'en observación':sv.level==='vet'?'ver al vet':'urgente');
+    set('hlW', w?`${w.kg} kg`:'sin datos');
+    set('hlMeals', meals.times.length?`${meals.times.length}/día`:'sin definir');
   },
   _vacMode:'vacuna',
   openVacSheet(mode){
@@ -1142,7 +1290,9 @@ ${p.medical?`<br>• Antecedentes: ${p.medical}`:''}
     if(!p){ this.toast('Primero crea el perfil de tu mascota 🐶'); return; }
     const days=30, since=Date.now()-days*864e5;
     const evs=this.state.events.filter(e=>e.ts>=since).sort((a,b)=>a.ts-b.ts);
-    if(evs.length<3){ this.toast('Necesitas más eventos registrados para un reporte útil 📊'); return; }
+    const healthData=(this.state.symptoms||[]).filter(s=>s.ts>=since).length
+      + (this.state.meds||[]).length + (this.state.weights||[]).length;
+    if(evs.length<3 && healthData<2){ this.toast('Necesitas más registros (eventos, síntomas, peso o medicamentos) para un reporte útil 📊'); return; }
     const {cnt}=this.emoDistribution(days);
     const emoTot=Object.values(cnt).reduce((a,b)=>a+b,0)||1;
     const byType={}; evs.forEach(e=>byType[e.type]=(byType[e.type]||0)+1);
@@ -1159,6 +1309,43 @@ ${p.medical?`<br>• Antecedentes: ${p.medical}`:''}
     if(night>=5) find.push(['media',`${night} vocalizaciones en horario nocturno (00:00–06:00): posible alteración del descanso.`]);
     if(this.state.lastAbsence&&this.state.lastAbsence.anxious) find.push(['media',`Última medición de ausencia: vocalizó a los ${this.state.lastAbsence.firstLat} min de la partida (${this.state.lastAbsence.total} eventos). Compatible con ansiedad por separación.`]);
     if((byType.gemido||0)/evs.length>0.3) find.push(['media',`Alta proporción de gemidos (${Math.round((byType.gemido/evs.length)*100)}%), asociable a búsqueda de atención o incomodidad.`]);
+    // ── salud diaria: malestares, tratamientos, peso y alimentación ──
+    const syms=(this.state.symptoms||[]).filter(s=>s.ts>=since).sort((a,b)=>a.ts-b.ts);
+    const symRows=syms.map(s=>`<tr><td>${new Date(s.ts).toLocaleString('es-CL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${this.SYMPTOMS[s.type].l}</td><td>${s.sev}</td><td>${(s.note||'—').replace(/</g,'&lt;')}</td></tr>`).join('');
+    const medsP=(this.state.meds||[]).filter(m=>this.medEndKey(m)>=this.dateKey(since));
+    const medRows=medsP.map(m=>{ const pr=this.medProgress(m);
+      return `<tr><td>${m.name}</td><td>${m.dose||'—'}</td><td>${m.times.length}×/día (${m.times.join(', ')})</td>
+      <td>${new Date(m.start+'T12:00:00').toLocaleDateString('es-CL')} — ${new Date(this.medEndKey(m)+'T12:00:00').toLocaleDateString('es-CL')}</td>
+      <td>${pr.given}/${pr.total} (${pr.pct}%)</td></tr>`; }).join('');
+    const wList=(this.state.weights||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)).filter(w=>w.date>=this.dateKey(since));
+    const wRows=wList.map((w,i)=>{ const pv=wList[i-1];
+      return `<tr><td>${new Date(w.date+'T12:00:00').toLocaleDateString('es-CL')}</td><td>${w.kg} kg</td>
+      <td>${pv?`${w.kg-pv.kg>0?'+':''}${(w.kg-pv.kg).toFixed(2)} kg`:'—'}</td></tr>`; }).join('');
+    const wTrend=this.weightTrend(days);
+    const ml=this.mealsOf();
+    const adher=(()=>{ if(!ml.times.length) return null;
+      let tot=0, ok=0;
+      for(let i=0;i<days;i++){ const k=this.addDays(this.dateKey(),-i); if(k<this.dateKey(since)) break;
+        const lg=ml.log[k]; if(!lg) continue; tot+=ml.times.length; ok+=ml.times.filter(t=>lg[t]).length; }
+      return tot?Math.round(ok/tot*100):null; })();
+    const mealLine=ml.times.length
+      ? `${ml.times.length} comidas diarias a las ${ml.times.join(', ')}${ml.grams?` · ${ml.grams} g por toma (${ml.grams*ml.times.length} g/día)`:''}${adher!==null?` · cumplimiento registrado: ${adher}%`:''}.`
+      : '';
+    // hallazgos derivados de la salud diaria
+    const sv=this.symptomVerdict();
+    if(sv.level==='urgent') find.unshift(['alta',`Signos de urgencia en las últimas 24 h: ${sv.reasons.join(' ')}`]);
+    else if(sv.level==='vet') find.push(['alta',`Malestares con criterio de consulta: ${sv.reasons.join(' ')}`]);
+    if(syms.length>=3){
+      const cnt={}; syms.forEach(s=>cnt[s.type]=(cnt[s.type]||0)+1);
+      const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+      find.push(['media',`${syms.length} malestares registrados en el período; el más frecuente fue ${this.SYMPTOMS[top[0]].l} (${top[1]} veces).`]);
+    }
+    if(wTrend&&Math.abs(wTrend.pct)>=10) find.push(['alta',`Variación de peso del ${wTrend.pct}% en ${wTrend.days} días (${wTrend.from.kg} → ${wTrend.to.kg} kg). Amerita evaluación.`]);
+    else if(wTrend&&Math.abs(wTrend.pct)>=5) find.push(['media',`Variación de peso del ${wTrend.pct}% en ${wTrend.days} días.`]);
+    medsP.filter(m=>{const pr=this.medProgress(m); return pr.total&&pr.pct<70&&this.medStatus(m)!=='upcoming';})
+      .forEach(m=>{ const pr=this.medProgress(m);
+        find.push(['media',`Adherencia baja en ${m.name}: ${pr.given} de ${pr.total} tomas registradas (${pr.pct}%).`]); });
     if(!find.length) find.push(['baja','No se detectaron patrones anómalos relevantes en el período analizado.']);
     const fmt=d=>new Date(d).toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'});
     const emoRows=Object.entries(cnt).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1])
@@ -1195,9 +1382,22 @@ footer{margin-top:26px;padding-top:12px;border-top:1px solid #f0e6dc;font-size:1
 
 <h2>Ficha del paciente</h2>
 <table><tr><th>Nombre</th><td>${p.name}</td><th>Raza</th><td>${p.breed||'—'}</td></tr>
-<tr><th>Edad</th><td>${p.age?p.age+' años':'—'}</td><th>Peso</th><td>${p.weight?p.weight+' kg':'—'}</td></tr>
+<tr><th>Edad</th><td>${this.ageLabel(p)}${p.birth?` (nac. ${new Date(p.birth+'T12:00:00').toLocaleDateString('es-CL')})`:''}</td><th>Peso</th><td>${p.weight?p.weight+' kg':'—'}</td></tr>
+<tr><th>Etapa vital</th><td>${this.lifeStage(p).label}</td><th>Esterilizado</th><td>${p.neutered==='si'?'Sí':p.neutered==='no'?'No':'—'}</td></tr>
 <tr><th>Sexo</th><td>${p.sex||'—'}</td><th>Actividad</th><td>${p.activity||'—'}</td></tr>
 ${p.medical?`<tr><th>Historial médico</th><td colspan="3">${p.medical}</td></tr>`:''}</table>
+
+${symRows?`<h2>Malestares registrados en el período</h2>
+<table><tr><th>Fecha y hora</th><th>Signo</th><th>Intensidad</th><th>Nota del tutor</th></tr>${symRows}</table>`:''}
+
+${medRows?`<h2>Tratamientos del período</h2>
+<table><tr><th>Medicamento</th><th>Dosis</th><th>Pauta</th><th>Período</th><th>Adherencia</th></tr>${medRows}</table>`:''}
+
+${wRows?`<h2>Curva de peso</h2>
+<table><tr><th>Fecha</th><th>Peso</th><th>Variación</th></tr>${wRows}</table>
+${wTrend?`<p style="font-size:12px;color:#6b5b53;margin-top:6px">Variación de ${wTrend.diff>0?'+':''}${wTrend.diff} kg (${wTrend.pct}%) en los últimos ${wTrend.days} días.</p>`:''}`:''}
+
+${mealLine?`<h2>Rutina de alimentación</h2><p style="font-size:13px">${mealLine}</p>`:''}
 
 <h2>Resumen del período</h2>
 <div class="grid">
@@ -1640,8 +1840,12 @@ ${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<tr><td>${SOUND_TY
       hero.textContent='👂'; hero.classList.add('active');
       st.textContent='Modo ausencia ACTIVO. Deja el teléfono cerca de tu perro y vete tranquilo. Registraré todo lo que pase.';
       document.getElementById('absSummary').innerHTML='';
+      this.askNotifPermission();
       if(!this.listening) this.toggleListen();
-      this.toast('Modo ausencia activado 🚪 ¡Que te vaya bien!');
+      this.toast('Modo ausencia activado 🚪 El micrófono queda ENCENDIDO grabando en segundo plano.');
+      // aviso persistente: el micrófono sigue abierto aunque cambies de pestaña
+      setTimeout(()=>this.notify('🔴 Micrófono encendido — Modo ausencia',
+        `DogTalk está escuchando a ${this.state.pet?this.state.pet.name:'tu perro'}. No cierres esta pestaña.`), 800);
     } else {
       const a=this.state.absence; a.active=false;
       const durMin=Math.round((Date.now()-a.start)/60000);
@@ -2157,9 +2361,14 @@ ${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<tr><td>${SOUND_TY
     const t=document.getElementById('toast'); t.textContent=msg; t.hidden=false;
     clearTimeout(this._tt); this._tt=setTimeout(()=>t.hidden=true, 3200);
   },
-  notify(title, body){
-    if(this.state.settings.notif && window.Notification && Notification.permission==='granted')
-      new Notification(title,{body, icon:'icon.png'});
+  notify(title, body, opts){
+    if(!this.state.settings.notif || !window.Notification || Notification.permission!=='granted') return;
+    const o={body, icon:'icon-192.png', badge:'icon-192.png', ...(opts||{})};
+    // en Android la notificación debe salir por el service worker
+    if(navigator.serviceWorker && navigator.serviceWorker.ready){
+      navigator.serviceWorker.ready.then(reg=>reg.showNotification(title,o))
+        .catch(()=>{ try{ new Notification(title,o); }catch(e){} });
+    } else { try{ new Notification(title,o); }catch(e){} }
   },
   exportData(){
     const blob=new Blob([JSON.stringify(this.state,null,2)],{type:'application/json'});
@@ -2167,6 +2376,910 @@ ${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<tr><td>${SOUND_TY
   },
   resetAll(){
     if(confirm('¿Borrar TODOS los datos de DogTalk AI?')){ localStorage.removeItem('dogtalk'); location.reload(); }
+  },
+
+  /* ══════════════════════════════════════════════════════════════════════
+     EDAD PRECISA Y ETAPA VITAL
+     La edad decimal (p.age) sigue existiendo para el resto del código, pero
+     ahora se deriva de la fecha de nacimiento y se recalcula en cada arranque.
+     ══════════════════════════════════════════════════════════════════════ */
+  ageMonths(p){
+    p = p===undefined ? this.state.pet : p;
+    if(!p) return null;
+    if(p.birth){
+      const b=new Date(p.birth+'T12:00:00'), n=new Date();
+      if(isNaN(b)) return null;
+      let m=(n.getFullYear()-b.getFullYear())*12+(n.getMonth()-b.getMonth());
+      if(n.getDate()<b.getDate()) m--;
+      return Math.max(0,m);
+    }
+    if(p.ageY!==undefined&&p.ageY!==null&&p.ageY!=='') return (+p.ageY||0)*12+(+p.ageM||0);
+    if(p.age) return Math.round(parseFloat(p.age)*12);
+    return null;
+  },
+  ageYears(p){ const m=this.ageMonths(p); return m==null?null:+(m/12).toFixed(2); },
+  ageLabel(p){
+    const m=this.ageMonths(p);
+    if(m==null) return 'edad no registrada';
+    const y=Math.floor(m/12), r=m%12;
+    if(m===0) return 'menos de 1 mes';
+    if(!y) return `${r} ${r===1?'mes':'meses'}`;
+    if(!r) return `${y} ${y===1?'año':'años'}`;
+    return `${y} ${y===1?'año':'años'} y ${r} ${r===1?'mes':'meses'}`;
+  },
+  // las razas grandes envejecen antes: el umbral senior se corre según el peso
+  lifeStage(p){
+    p = p===undefined ? this.state.pet : p;
+    const m=this.ageMonths(p), w=parseFloat(p&&p.weight)||0;
+    if(m==null) return {key:'adulto',label:'Adulto',emoji:'🐕',note:''};
+    const seniorAt = w>=40?84 : w>=25?90 : 108; // meses
+    if(m<4)  return {key:'lactante',label:'Cachorro (0–4 meses)',emoji:'🍼',note:'Etapa de socialización y vacunación primaria.'};
+    if(m<12) return {key:'cachorro',label:'Cachorro (4–12 meses)',emoji:'🐶',note:'Crecimiento rápido: alimento de cachorro y ejercicio moderado.'};
+    if(m<24) return {key:'joven',label:'Adulto joven',emoji:'🐕',note:'Madurez conductual en curso; mucha energía.'};
+    if(m<seniorAt) return {key:'adulto',label:'Adulto',emoji:'🐕',note:'Control veterinario anual.'};
+    if(m<seniorAt+36) return {key:'senior',label:'Senior',emoji:'🐕‍🦺',note:'Chequeos cada 6 meses y control de peso.'};
+    return {key:'geriatrico',label:'Geriátrico',emoji:'🐕‍🦺',note:'Chequeos cada 6 meses con exámenes de sangre y presión.'};
+  },
+  syncAges(){
+    (this.state.pets||[]).forEach(p=>{ const y=this.ageYears(p); if(y!=null) p.age=y; });
+  },
+  isBirthday(p){
+    p = p===undefined ? this.state.pet : p;
+    if(!p||!p.birth) return false;
+    const b=new Date(p.birth+'T12:00:00'), n=new Date();
+    return b.getDate()===n.getDate() && b.getMonth()===n.getMonth() && n.getFullYear()>b.getFullYear();
+  },
+  onBirthChange(){
+    const b=document.getElementById('petBirth').value;
+    const hint=document.getElementById('ageHint');
+    if(!b){ hint.textContent='Si no la sabes exacta, deja el campo vacío y usa la edad aproximada.'; return; }
+    const m=this.ageMonths({birth:b});
+    if(m==null||m<0){ hint.textContent='Revisa la fecha: no puede ser futura.'; return; }
+    document.getElementById('petAgeY').value=Math.floor(m/12);
+    document.getElementById('petAgeM').value=m%12;
+    const st=this.lifeStage({birth:b,weight:document.getElementById('petWeight').value});
+    hint.innerHTML=`🎂 <b>${this.ageLabel({birth:b})}</b> · ${st.emoji} ${st.label}`;
+  },
+  onManualAge(){
+    if(document.getElementById('petBirth').value) return;
+    const y=+document.getElementById('petAgeY').value||0, mo=+document.getElementById('petAgeM').value||0;
+    const st=this.lifeStage({ageY:y,ageM:mo,weight:document.getElementById('petWeight').value});
+    document.getElementById('ageHint').innerHTML = (y||mo)
+      ? `📅 <b>${this.ageLabel({ageY:y,ageM:mo})}</b> · ${st.emoji} ${st.label} <span style="opacity:.7">(más exacto con la fecha de nacimiento)</span>`
+      : 'Si no la sabes exacta, deja el campo vacío y usa la edad aproximada.';
+  },
+
+  /* ---------- utilidades de fecha ---------- */
+  dateKey(d){ d = d===undefined?new Date():new Date(d);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); },
+  minOf(hhmm){ const [h,m]=String(hhmm).split(':').map(Number); return (h||0)*60+(m||0); },
+  addDays(key,n){ const d=new Date(key+'T12:00:00'); d.setDate(d.getDate()+n); return this.dateKey(d); },
+  prettyDay(key){
+    const today=this.dateKey(), yest=this.addDays(today,-1), tom=this.addDays(today,1);
+    if(key===today) return 'Hoy'; if(key===yest) return 'Ayer'; if(key===tom) return 'Mañana';
+    return new Date(key+'T12:00:00').toLocaleDateString('es-CL',{weekday:'short',day:'2-digit',month:'short'});
+  },
+
+  /* ══════════════════════════════════════════════════════════════════════
+     RUTINA DE COMIDAS
+     ══════════════════════════════════════════════════════════════════════ */
+  mealsOf(){
+    const p=this.state.pet; if(!p) return {times:[],grams:null,log:{}};
+    if(!p.meals) p.meals={times:[],grams:null,log:{}};
+    if(!p.meals.log) p.meals.log={};
+    if(!Array.isArray(p.meals.times)) p.meals.times=[];
+    return p.meals;
+  },
+  suggestMealTimes(n){
+    return ({1:['09:00'],2:['08:00','19:00'],3:['08:00','14:00','20:00'],4:['07:00','12:00','17:00','21:00']})[n]||['08:00','19:00'];
+  },
+  addMealTime(){
+    const t=document.getElementById('newMealTime').value; if(!t) return;
+    const m=this.mealsOf();
+    if(m.times.includes(t)){ this.toast('Ese horario ya está 🍽️'); return; }
+    m.times.push(t); m.times.sort((a,b)=>this.minOf(a)-this.minOf(b));
+    this.save(); this.renderMeals(); this.toast(`Comida de las ${t} agregada 🍲`);
+    this.askNotifPermission();
+  },
+  delMealTime(t){
+    const m=this.mealsOf(); m.times=m.times.filter(x=>x!==t); this.save(); this.renderMeals();
+  },
+  useSuggestedMeals(){
+    const r=this.rationCalc(this.state.pet);
+    const m=this.mealsOf(); m.times=this.suggestMealTimes(r?r.tomas:2);
+    if(r) m.grams=r.perMeal;
+    this.save(); this.renderMeals(); this.confetti();
+    this.toast(`Rutina creada: ${m.times.length} comidas al día ✅`);
+    this.askNotifPermission();
+  },
+  toggleMealDone(t){
+    const m=this.mealsOf(), k=this.dateKey();
+    m.log[k]=m.log[k]||{};
+    if(m.log[k][t]){ delete m.log[k][t]; }
+    else { m.log[k][t]=Date.now(); this.confetti(); }
+    this.save(); this.renderMeals(); this.renderAgenda();
+  },
+  saveMealGrams(){
+    const v=parseFloat(document.getElementById('mealGrams').value);
+    const m=this.mealsOf(); m.grams = isNaN(v)||v<=0 ? null : v;
+    this.save(); this.renderMeals(); this.toast(m.grams?`${m.grams} g por toma guardados 🥣`:'Gramos borrados');
+  },
+  renderMeals(){
+    const p=this.state.pet, m=this.mealsOf(), k=this.dateKey();
+    const done=m.log[k]||{};
+    const r=this.rationCalc(p);
+    const doneCount=m.times.filter(t=>done[t]).length;
+    document.getElementById('mealHero').innerHTML = m.times.length ? `
+      <div class="mh-ring"><b>${doneCount}</b><small>de ${m.times.length}</small></div>
+      <div class="mh-txt">
+        <p class="mh-title">${p?p.name:'Tu perro'} come <b>${m.times.length} ${m.times.length===1?'vez':'veces'}</b> al día</p>
+        <p class="mh-sub">${m.grams?`${m.grams} g por toma · ${m.grams*m.times.length} g diarios`:'Sin gramaje registrado'}${doneCount===m.times.length?' · ¡todo servido hoy! 🎉':''}</p>
+      </div>` : `
+      <div class="mh-empty">
+        <p>🍽️ Aún no defines la rutina de comidas.</p>
+        ${r?`<button class="btn-primary btn-inline" onclick="App.useSuggestedMeals()">Usar ${r.tomas} tomas de ${r.perMeal} g</button>`
+           :`<p class="mh-sub">Agrega el peso de tu perro en el perfil y te calculo la ración.</p>`}
+      </div>`;
+
+    document.getElementById('mealTimes').innerHTML = m.times.length ? m.times.map(t=>{
+      const ok=!!done[t];
+      const late = !ok && this.minOf(t) < (new Date().getHours()*60+new Date().getMinutes());
+      return `<div class="meal-row ${ok?'done':late?'late':''}">
+        <button class="meal-check" onclick="App.toggleMealDone('${t}')">${ok?'✅':'⭕'}</button>
+        <div class="meal-info"><p class="meal-time">${t}</p>
+          <p class="meal-meta">${ok?`Servida a las ${new Date(done[t]).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'})}`:late?'Pendiente (ya pasó la hora)':'Programada'}${m.grams?` · ${m.grams} g`:''}</p></div>
+        <button class="vi-del" onclick="App.delMealTime('${t}')">🗑️</button>
+      </div>`;
+    }).join('') : this.emptyIllu('Sin horarios de comida.<br>Agrega el primero abajo.');
+
+    document.getElementById('mealRation').innerHTML = r ? `
+      <div class="ration-box">
+        <p>🔥 <b>${r.mer} kcal</b> al día (RER ${r.rer} × factor ${r.factor})</p>
+        <p>🥣 <b>${r.grams} g</b> de alimento seco al día — <b>${r.tomas} tomas</b> de ~${r.perMeal} g</p>
+        <p class="ration-note">Calculado para ${p.name}: ${r.etapa}. Ajusta según las kcal reales de tu marca y su condición corporal.</p>
+      </div>` : `<div class="ration-box empty">Agrega el <b>peso</b> de tu perro en el perfil para calcular la ración exacta.</div>`;
+    document.getElementById('mealGrams').value = m.grams||'';
+
+    // últimos 7 días
+    const days=[]; for(let i=6;i>=0;i--) days.push(this.addDays(k,-i));
+    document.getElementById('mealWeek').innerHTML = m.times.length ? days.map(d=>{
+      const lg=m.log[d]||{};
+      const n=m.times.filter(t=>lg[t]).length;
+      const pct = m.times.length? n/m.times.length : 0;
+      return `<div class="mw-day">
+        <div class="mw-bar"><span style="height:${Math.round(pct*100)}%"></span></div>
+        <p class="mw-n">${n}/${m.times.length}</p>
+        <p class="mw-lbl">${new Date(d+'T12:00:00').toLocaleDateString('es-CL',{weekday:'short'}).slice(0,3)}</p>
+      </div>`;
+    }).join('') : '<p class="sec-sub">Define horarios para ver el seguimiento semanal.</p>';
+  },
+
+  /* ══════════════════════════════════════════════════════════════════════
+     CONTROL DE PESO
+     ══════════════════════════════════════════════════════════════════════ */
+  saveWeight(){
+    const kg=parseFloat(document.getElementById('wKg').value);
+    const date=document.getElementById('wDate').value||this.dateKey();
+    if(!kg||kg<=0){ this.toast('Indica un peso válido ⚖️'); return; }
+    if(kg>120){ this.toast('¿Seguro? Ese peso parece muy alto 🤔'); }
+    const list=this.state.weights;
+    const prev=list.slice().sort((a,b)=>a.date.localeCompare(b.date)).pop();
+    const same=list.find(w=>w.date===date);
+    if(same) same.kg=kg; else list.push({id:'w'+Date.now(), date, kg});
+    // el peso del perfil siempre refleja el registro más reciente
+    const latest=list.slice().sort((a,b)=>a.date.localeCompare(b.date)).pop();
+    if(this.state.pet) this.state.pet.weight=latest.kg;
+    this.save();
+    document.getElementById('wKg').value='';
+    this.renderWeight();
+    if(prev){
+      const d=+(kg-prev.kg).toFixed(1), pct=Math.abs(d/prev.kg*100);
+      this.toast(d===0?'Peso estable ⚖️':`${d>0?'Subió':'Bajó'} ${Math.abs(d)} kg (${pct.toFixed(1)}%) desde ${new Date(prev.date+'T12:00:00').toLocaleDateString('es-CL')}`);
+    } else this.toast('Primer peso registrado ⚖️ Pésalo cada 2–4 semanas.');
+  },
+  delWeight(id){
+    if(!confirm('¿Eliminar este registro de peso?')) return;
+    this.state.weights=this.state.weights.filter(w=>w.id!==id);
+    const latest=this.state.weights.slice().sort((a,b)=>a.date.localeCompare(b.date)).pop();
+    if(latest&&this.state.pet) this.state.pet.weight=latest.kg;
+    this.save(); this.renderWeight();
+  },
+  weightTrend(days){
+    const list=(this.state.weights||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+    if(list.length<2) return null;
+    const since=this.addDays(this.dateKey(),-days);
+    const win=list.filter(w=>w.date>=since);
+    if(win.length<2) return null;
+    const a=win[0], b=win[win.length-1];
+    const diff=+(b.kg-a.kg).toFixed(2);
+    return {from:a, to:b, diff, pct:+(diff/a.kg*100).toFixed(1), days};
+  },
+  weightChart(list){
+    if(list.length<2) return '<p class="sec-sub">Registra al menos dos pesos para ver la curva 📈</p>';
+    const pts=list.slice(-14);
+    const kgs=pts.map(p=>p.kg);
+    const min=Math.min(...kgs), max=Math.max(...kgs);
+    const pad=(max-min)*0.25 || 0.5;
+    const lo=min-pad, hi=max+pad, W=320, H=130, m=18;
+    const x=i=>m+(i*(W-m*2))/(pts.length-1);
+    const y=v=>H-m-((v-lo)/(hi-lo))*(H-m*2);
+    const line=pts.map((p,i)=>`${x(i).toFixed(1)},${y(p.kg).toFixed(1)}`).join(' ');
+    const area=`${m},${H-m} ${line} ${W-m},${H-m}`;
+    return `<svg viewBox="0 0 ${W} ${H}" class="wsvg" preserveAspectRatio="none">
+      <polygon points="${area}" fill="url(#wg)"/>
+      <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--teal)" stop-opacity=".35"/><stop offset="100%" stop-color="var(--teal)" stop-opacity="0"/>
+      </linearGradient></defs>
+      <polyline points="${line}" fill="none" stroke="var(--teal)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+      ${pts.map((p,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(p.kg).toFixed(1)}" r="4" fill="var(--card)" stroke="var(--teal)" stroke-width="2.5"/>`).join('')}
+      <text x="${m}" y="12" class="wsvg-t">${max} kg</text>
+      <text x="${m}" y="${H-4}" class="wsvg-t">${min} kg</text>
+    </svg>`;
+  },
+  renderWeight(){
+    const p=this.state.pet;
+    const list=(this.state.weights||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+    const last=list[list.length-1];
+    const t30=this.weightTrend(30), t90=this.weightTrend(90);
+    document.getElementById('wDate').value=this.dateKey();
+    document.getElementById('wHero').innerHTML = last ? `
+      <div class="wh-main"><b>${last.kg}</b><span>kg</span></div>
+      <div class="wh-side">
+        <p class="wh-lbl">Último registro</p>
+        <p class="wh-date">${new Date(last.date+'T12:00:00').toLocaleDateString('es-CL',{day:'2-digit',month:'long'})}</p>
+        ${t30?`<p class="wh-trend ${t30.diff>0?'up':t30.diff<0?'down':''}">${t30.diff>0?'▲':t30.diff<0?'▼':'●'} ${Math.abs(t30.diff)} kg (${Math.abs(t30.pct)}%) en 30 días</p>`:''}
+      </div>` : `<div class="mh-empty"><p>⚖️ Sin registros de peso todavía.</p><p class="mh-sub">Pesar cada 2–4 semanas es la forma más simple de detectar problemas a tiempo.</p></div>`;
+    document.getElementById('wChart').innerHTML=this.weightChart(list);
+
+    // lectura clínica de la variación
+    let note='';
+    const ref=t30||t90;
+    if(ref){
+      const ap=Math.abs(ref.pct);
+      if(ap>=10) note=`<div class="w-alert danger">⚠️ El peso ${ref.diff>0?'subió':'bajó'} un <b>${ap}%</b> en ${ref.days} días. Una variación mayor al 10% sin cambio de dieta merece consulta veterinaria${ref.diff<0?' (pérdida de peso involuntaria)':''}.</div>`;
+      else if(ap>=5) note=`<div class="w-alert warn">👀 Variación del <b>${ap}%</b> en ${ref.days} días. Revisa la ración y el ejercicio; si sigue la tendencia, consúltalo.</div>`;
+      else note=`<div class="w-alert ok">✅ Peso estable (${ref.diff>0?'+':''}${ref.diff} kg en ${ref.days} días). Así se ve un buen control.</div>`;
+    }
+    const r=this.rationCalc(p);
+    if(r) note+=`<div class="w-alert info">🥣 Con ${r.w} kg, ${p.name} necesita ~<b>${r.mer} kcal</b> (${r.grams} g) al día. <span onclick="App.go('meals')" style="text-decoration:underline;cursor:pointer">Ver rutina de comidas</span></div>`;
+    document.getElementById('wNote').innerHTML=note;
+
+    document.getElementById('wList').innerHTML = list.length ? list.slice().reverse().map((w,i,arr)=>{
+      const prev=arr[i+1];
+      const d=prev?+(w.kg-prev.kg).toFixed(2):null;
+      return `<div class="w-item">
+        <span class="wi-kg">${w.kg} kg</span>
+        <span class="wi-date">${new Date(w.date+'T12:00:00').toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'2-digit'})}</span>
+        ${d!==null?`<span class="wi-diff ${d>0?'up':d<0?'down':''}">${d>0?'+':''}${d} kg</span>`:'<span class="wi-diff">—</span>'}
+        <button class="vi-del" onclick="App.delWeight('${w.id}')">🗑️</button>
+      </div>`;
+    }).join('') : this.emptyIllu('Sin registros de peso.');
+  },
+
+  /* ══════════════════════════════════════════════════════════════════════
+     REGISTRO DE MALESTARES (síntomas)
+     Catálogo con banderas rojas (urgencia por sí solas) y reglas de patrón.
+     ══════════════════════════════════════════════════════════════════════ */
+  SYMPTOMS:{
+    vomito:{e:'🤮',l:'Vómito'},
+    diarrea:{e:'💩',l:'Diarrea'},
+    sangre:{e:'🩸',l:'Sangre en heces/vómito',red:true},
+    no_come:{e:'🥣',l:'No quiere comer'},
+    no_bebe:{e:'💧',l:'No bebe agua'},
+    decaido:{e:'😔',l:'Decaído / apático'},
+    cojera:{e:'🦿',l:'Cojera'},
+    tos:{e:'😮‍💨',l:'Tos'},
+    estornudo:{e:'🤧',l:'Estornudos / mocos'},
+    rascado:{e:'🐾',l:'Se rasca mucho'},
+    orejas:{e:'👂',l:'Sacude las orejas'},
+    ojos:{e:'👁️',l:'Ojos con secreción'},
+    temblor:{e:'🥶',l:'Temblores'},
+    convulsion:{e:'⚡',l:'Convulsión',red:true},
+    respira:{e:'😰',l:'Le cuesta respirar',red:true},
+    abdomen:{e:'🎈',l:'Abdomen hinchado y duro',red:true},
+    orina:{e:'🚽',l:'Orina rara / le cuesta',},
+    herida:{e:'🩹',l:'Herida o golpe'},
+    fiebre:{e:'🌡️',l:'Se siente afiebrado'},
+    otro_sintoma:{e:'📌',l:'Otro malestar'},
+  },
+  FP_REASONS:{
+    tv:{e:'📺',l:'TV / radio'},
+    otro_perro:{e:'🐕',l:'Otro perro'},
+    calle:{e:'🚗',l:'Ruido de la calle'},
+    timbre:{e:'🔔',l:'Timbre / alarma'},
+    persona:{e:'🗣️',l:'Voz humana'},
+    musica:{e:'🎵',l:'Música'},
+    juguete:{e:'🧸',l:'Juguete / roce'},
+    otro_fp:{e:'❓',l:'Otro ruido'},
+  },
+  _symType:null,
+  openSymSheet(type){
+    this._symType=type;
+    const s=this.SYMPTOMS[type];
+    document.getElementById('symSheetTitle').textContent=`${s.e} ${s.l}`;
+    document.getElementById('symSheetSub').textContent=s.red
+      ? '⚠️ Este signo puede ser una urgencia veterinaria por sí solo.'
+      : 'Registra la hora real: los patrones son lo que más ayuda al veterinario.';
+    document.getElementById('symNote').value='';
+    document.getElementById('symWhenCustom').hidden=true;
+    document.querySelectorAll('#symWhen .chip').forEach((c,i)=>c.classList.toggle('sel',i===0));
+    document.querySelectorAll('#symSeverity .chip').forEach((c,i)=>c.classList.toggle('sel',i===0));
+    document.getElementById('symBackdrop').hidden=false;
+    document.getElementById('symSheet').hidden=false;
+  },
+  closeSymSheet(){ document.getElementById('symBackdrop').hidden=true; document.getElementById('symSheet').hidden=true; },
+  saveSymptom(){
+    const when=(document.querySelector('#symWhen .chip.sel')||{}).dataset?.v||'0';
+    const sev=(document.querySelector('#symSeverity .chip.sel')||{}).dataset?.v||'leve';
+    let ts=Date.now();
+    if(when==='custom'){
+      const v=document.getElementById('symWhenCustom').value;
+      if(!v){ this.toast('Elige la fecha y hora 📅'); return; }
+      ts=new Date(v).getTime();
+    } else ts=Date.now()-(+when)*60000;
+    this.state.symptoms.push({id:'s'+Date.now(), ts, type:this._symType, sev,
+      note:document.getElementById('symNote').value.trim()});
+    this.save(); this.closeSymSheet(); this.renderSymptoms();
+    const v=this.symptomVerdict();
+    this.toast(`${this.SYMPTOMS[this._symType].l} registrado`);
+    if(v.level==='urgent') this.notify('⚠️ DogTalk AI', v.title);
+  },
+  delSymptom(id){
+    if(!confirm('¿Eliminar este registro?')) return;
+    this.state.symptoms=this.state.symptoms.filter(s=>s.id!==id); this.save(); this.renderSymptoms();
+  },
+  // Reglas de patrón — orientación, nunca diagnóstico
+  symptomVerdict(){
+    const S=(this.state.symptoms||[]).slice().sort((a,b)=>b.ts-a.ts);
+    const now=Date.now(), ago=h=>now-h*36e5;
+    const inH=(t,h)=>S.filter(s=>s.type===t&&s.ts>=ago(h));
+    const anyH=h=>S.filter(s=>s.ts>=ago(h));
+    const order=['ok','watch','vet','urgent']; let level='ok'; const reasons=[];
+    const bump=(l,r)=>{ if(order.indexOf(l)>order.indexOf(level)) level=l; if(r&&!reasons.includes(r)) reasons.push(r); };
+    const months=this.ageMonths();
+    const fragil = months!=null && (months<6 || months>=96);
+    const name=this.state.pet?this.state.pet.name:'Tu perro';
+
+    anyH(24).filter(s=>(this.SYMPTOMS[s.type]||{}).red)
+      .forEach(s=>bump('urgent',`${this.SYMPTOMS[s.type].l}: es un signo de urgencia por sí solo, no esperes.`));
+    anyH(24).filter(s=>s.sev==='grave')
+      .forEach(s=>bump('vet',`${this.SYMPTOMS[s.type].l} marcado como grave en las últimas 24 h.`));
+
+    if(inH('vomito',12).length>=3) bump('urgent','3 o más vómitos en 12 h: riesgo real de deshidratación.');
+    else if(inH('vomito',24).length>=2) bump('vet','2 vómitos en 24 h.');
+    if(inH('diarrea',24).length>=4) bump('vet','4 o más deposiciones líquidas en 24 h.');
+    const dDays=new Set(S.filter(s=>s.type==='diarrea'&&s.ts>=ago(96)).map(s=>this.dateKey(s.ts))).size;
+    if(dDays>=3) bump('vet','Diarrea presente 3 días o más seguidos.');
+    if(inH('vomito',24).length&&inH('diarrea',24).length)
+      bump(fragil?'urgent':'vet',`Vómito y diarrea juntos en 24 h${fragil?` — en ${name}, por su edad, la deshidratación avanza muy rápido.`:'.'}`);
+    if(inH('no_come',36).length>=2) bump('vet','Lleva más de un día sin querer comer.');
+    if(inH('no_come',24).length&&inH('decaido',24).length) bump('vet','No come y está decaído a la vez.');
+    if(inH('no_bebe',24).length>=2) bump('vet','No está bebiendo agua: vigila la deshidratación (pellizca la piel del lomo; debe volver de inmediato).');
+    if(inH('cojera',72).length>=3) bump('vet','Cojera repetida en 3 días.');
+    if(inH('tos',72).length>=3) bump('vet','Tos persistente por 3 días o más.');
+    if(inH('orina',48).length>=2) bump('vet','Problemas urinarios repetidos: en machos, la obstrucción es una urgencia.');
+    const distinct=new Set(anyH(48).map(s=>s.type)).size;
+    if(distinct>=3) bump('vet',`${distinct} síntomas distintos en 48 h: el cuadro merece revisión profesional.`);
+    if(level==='ok'&&anyH(72).length) bump('watch','Hay malestares recientes registrados. Sigue observando y anota cualquier cambio.');
+
+    const meds=(this.state.meds||[]).filter(m=>this.medIsActive(m));
+    if(meds.length&&level!=='ok') reasons.push(`Está en tratamiento con ${meds.map(m=>m.name).join(', ')}: menciónalo en la consulta (puede ser un efecto adverso).`);
+
+    const map={
+      urgent:{ico:'🚨',title:'Señales de urgencia: contacta a un veterinario ahora',cls:'urgent'},
+      vet:{ico:'⚠️',title:'Conviene una consulta veterinaria pronto',cls:'vet'},
+      watch:{ico:'👀',title:'En observación',cls:'watch'},
+      ok:{ico:'✅',title:`${name} sin malestares registrados`,cls:'ok'},
+    };
+    return {level, reasons, ...map[level], count:anyH(168).length};
+  },
+  renderSymptoms(){
+    const v=this.symptomVerdict();
+    document.getElementById('symVerdict').className='sym-verdict '+v.cls;
+    document.getElementById('symVerdict').innerHTML=`
+      <div class="sv-head"><span>${v.ico}</span><h4>${v.title}</h4></div>
+      ${v.reasons.length?`<ul class="sv-list">${v.reasons.map(r=>`<li>${r}</li>`).join('')}</ul>`:
+        '<p class="sv-sub">Registra cualquier vómito, diarrea o decaimiento: con dos o tres datos ya detectamos patrones.</p>'}
+      ${v.level!=='ok'?'<p class="sv-disc">⚕️ Orientación informativa, no un diagnóstico. Ante la duda, consulta siempre.</p>':''}`;
+
+    document.getElementById('symGrid').innerHTML=Object.entries(this.SYMPTOMS).map(([k,s])=>
+      `<button class="sym-btn${s.red?' red':''}" onclick="App.openSymSheet('${k}')"><span>${s.e}</span>${s.l}</button>`).join('');
+
+    const S=(this.state.symptoms||[]).slice().sort((a,b)=>b.ts-a.ts);
+    const week=Date.now()-7*864e5;
+    const recent=S.filter(s=>s.ts>=week);
+    const byDay={};
+    recent.forEach(s=>{ const k=this.dateKey(s.ts); (byDay[k]=byDay[k]||[]).push(s); });
+    document.getElementById('symTimeline').innerHTML=Object.keys(byDay).length
+      ? Object.keys(byDay).sort().reverse().map(k=>`
+        <div class="st-day"><p class="st-date">${this.prettyDay(k)}</p>
+          <div class="st-chips">${byDay[k].map(s=>`<span class="st-chip sev-${s.sev}" title="${s.note||''}">${this.SYMPTOMS[s.type].e} ${this.SYMPTOMS[s.type].l} · ${new Date(s.ts).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'})}</span>`).join('')}</div>
+        </div>`).join('')
+      : this.emptyIllu('Sin malestares esta semana. ¡Buena señal! 🎉');
+
+    document.getElementById('symList').innerHTML = S.length ? S.map(s=>{
+      const d=this.SYMPTOMS[s.type];
+      return `<div class="sym-item">
+        <span class="event-emoji">${d.e}</span>
+        <div class="event-info"><p class="event-title">${d.l} <span class="sev-tag sev-${s.sev}">${s.sev}</span></p>
+          <p class="event-meta">${new Date(s.ts).toLocaleString('es-CL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}${s.note?' · '+s.note.replace(/</g,'&lt;'):''}</p></div>
+        <button class="vi-del" onclick="App.delSymptom('${s.id}')">🗑️</button>
+      </div>`;
+    }).join('') : this.emptyIllu('Sin malestares registrados.');
+  },
+
+  /* ══════════════════════════════════════════════════════════════════════
+     MEDICAMENTOS · CALENDARIO DE TOMAS · ALARMAS
+     ══════════════════════════════════════════════════════════════════════ */
+  MED_SUGGEST:['Amoxicilina','Amoxicilina + clavulánico','Metronidazol','Enrofloxacina','Meloxicam','Carprofeno',
+    'Prednisolona','Omeprazol','Maropitant (Cerenia)','Apoquel','Antihistamínico','Gotas óticas','Colirio',
+    'Antiparasitario interno','Antipulgas','Probiótico','Suplemento articular','Suero oral'],
+  medDefaultTimes(f){
+    return ({1:['09:00'],2:['09:00','21:00'],3:['07:00','15:00','23:00'],4:['06:00','12:00','18:00','00:00']})[f]||['09:00','21:00'];
+  },
+  medEndKey(m){ return this.addDays(m.start, (+m.days||1)-1); },
+  medRunsOn(m,key){ return !m.stopped && key>=m.start && key<=this.medEndKey(m); },
+  medIsActive(m){ return this.medRunsOn(m, this.dateKey()); },
+  medStatus(m){
+    const k=this.dateKey();
+    if(m.stopped) return 'stopped';
+    if(k<m.start) return 'upcoming';
+    if(k>this.medEndKey(m)) return 'done';
+    return 'active';
+  },
+  medProgress(m){
+    const total=(+m.days||1)*(m.times||[]).length;
+    const given=Object.values(m.doses||{}).filter(d=>d.st==='taken').length;
+    const skipped=Object.values(m.doses||{}).filter(d=>d.st==='skipped').length;
+    const dayN=Math.min(+m.days||1, Math.max(1, Math.round((new Date(this.dateKey()+'T12:00:00')-new Date(m.start+'T12:00:00'))/864e5)+1));
+    return {total, given, skipped, dayN, days:+m.days||1, pct: total?Math.round(given/total*100):0};
+  },
+  medDoseState(m,key,time){
+    const d=(m.doses||{})[key+'|'+time];
+    if(d) return d.st;
+    const now=new Date(), today=this.dateKey();
+    if(key<today) return 'missed';
+    if(key===today && this.minOf(time) < now.getHours()*60+now.getMinutes()) return 'due';
+    return 'pending';
+  },
+  medMark(id,key,time,st){
+    const m=(this.state.meds||[]).find(x=>x.id===id); if(!m) return;
+    m.doses=m.doses||{};
+    const k=key+'|'+time;
+    if(m.doses[k]&&m.doses[k].st===st) delete m.doses[k];
+    else { m.doses[k]={st, ts:Date.now()}; if(st==='taken') this.confetti(); }
+    this.save(); this.renderMeds(); this.renderAgenda();
+    const p=this.medProgress(m);
+    if(st==='taken'&&p.given===p.total) this.toast(`¡Tratamiento de ${m.name} completado! 🎉`);
+  },
+  medFreqChanged(){
+    const f=+document.getElementById('medFreq').value;
+    if(f>0) this._medTimes=this.medDefaultTimes(f);
+    this.renderMedTimes();
+  },
+  _medTimes:['09:00','21:00'],
+  renderMedTimes(){
+    document.getElementById('medTimes').innerHTML=this._medTimes.map((t,i)=>`
+      <div class="time-chip"><input type="time" value="${t}" onchange="App._medTimes[${i}]=this.value">
+        ${this._medTimes.length>1?`<button onclick="App._medTimes.splice(${i},1);App.renderMedTimes()">✕</button>`:''}</div>`).join('')
+      + `<button class="time-add" onclick="App._medTimes.push('12:00');App.renderMedTimes()">➕</button>`;
+  },
+  openMedSheet(id){
+    this._medEdit=id||null;
+    const m=id?(this.state.meds||[]).find(x=>x.id===id):null;
+    document.getElementById('medSheetTitle').textContent=m?'Editar tratamiento':'Nuevo medicamento';
+    document.getElementById('medSuggest').innerHTML=this.MED_SUGGEST.map(s=>`<option value="${s}">`).join('');
+    document.getElementById('medName').value=m?m.name:'';
+    document.getElementById('medDose').value=m?m.dose||'':'';
+    document.getElementById('medReason').value=m?m.reason||'':'';
+    document.getElementById('medFreq').value=m?String((m.times||[]).length):'2';
+    document.getElementById('medDays').value=m?m.days:7;
+    document.getElementById('medStart').value=m?m.start:this.dateKey();
+    document.getElementById('medNotify').checked=m?m.notify!==false:true;
+    document.getElementById('medNotes').value=m?m.notes||'':'';
+    this._medTimes=m?m.times.slice():this.medDefaultTimes(2);
+    this.renderMedTimes();
+    document.getElementById('medBackdrop').hidden=false;
+    document.getElementById('medSheet').hidden=false;
+  },
+  closeMedSheet(){ document.getElementById('medBackdrop').hidden=true; document.getElementById('medSheet').hidden=true; },
+  saveMed(){
+    const name=document.getElementById('medName').value.trim();
+    if(!name){ this.toast('Ponle nombre al medicamento 💊'); return; }
+    const days=Math.max(1,+document.getElementById('medDays').value||1);
+    const start=document.getElementById('medStart').value||this.dateKey();
+    const times=this._medTimes.slice().sort((a,b)=>this.minOf(a)-this.minOf(b));
+    if(!times.length){ this.toast('Agrega al menos un horario ⏰'); return; }
+    const data={name, dose:document.getElementById('medDose').value.trim(),
+      reason:document.getElementById('medReason').value.trim(),
+      days, start, times, notify:document.getElementById('medNotify').checked,
+      notes:document.getElementById('medNotes').value.trim()};
+    if(this._medEdit){
+      const m=(this.state.meds||[]).find(x=>x.id===this._medEdit);
+      Object.assign(m,data);
+    } else {
+      this.state.meds.push({id:'m'+Date.now(), ...data, doses:{}, created:Date.now()});
+    }
+    this.save(); this.closeMedSheet(); this.renderMeds(); this.confetti();
+    const end=new Date(this.addDays(start,days-1)+'T12:00:00');
+    this.toast(`${name}: ${times.length} tomas al día hasta el ${end.toLocaleDateString('es-CL')} 💊`);
+    if(data.notify) this.askNotifPermission();
+    this._medEdit=null;
+  },
+  stopMed(id){
+    const m=(this.state.meds||[]).find(x=>x.id===id); if(!m) return;
+    if(!confirm(`¿Terminar el tratamiento de ${m.name} antes de tiempo?`)) return;
+    m.stopped=Date.now(); this.save(); this.renderMeds();
+    this.toast('Tratamiento cerrado. Queda en el historial 📋');
+  },
+  delMed(id){
+    if(!confirm('¿Eliminar este tratamiento y su historial de tomas?')) return;
+    this.state.meds=(this.state.meds||[]).filter(m=>m.id!==id); this.save(); this.renderMeds();
+  },
+  medDosesToday(){
+    const key=this.dateKey(), out=[];
+    (this.state.meds||[]).forEach(m=>{
+      if(!this.medRunsOn(m,key)) return;
+      m.times.forEach(t=>out.push({med:m, time:t, key, st:this.medDoseState(m,key,t)}));
+    });
+    return out.sort((a,b)=>this.minOf(a.time)-this.minOf(b.time));
+  },
+  renderMeds(){
+    const list=this.state.meds||[];
+    const today=this.medDosesToday();
+    const pend=today.filter(d=>d.st==='due'||d.st==='pending');
+    document.getElementById('medToday').innerHTML = today.length ? `
+      <div class="mt-head"><span>💊</span><h4>Tomas de hoy</h4>
+        <span class="mt-count">${today.filter(d=>d.st==='taken').length}/${today.length}</span></div>
+      <div class="mt-rows">${today.map(d=>`
+        <div class="mt-row ${d.st}">
+          <span class="mt-time">${d.time}</span>
+          <div class="mt-info"><p class="mt-name">${d.med.name}</p>
+            <p class="mt-dose">${d.med.dose||'—'}${d.st==='due'?' · ⏰ atrasada':d.st==='taken'?' · ✅ dada':d.st==='skipped'?' · omitida':''}</p></div>
+          <button class="mt-btn ${d.st==='taken'?'on':''}" onclick="App.medMark('${d.med.id}','${d.key}','${d.time}','taken')">${d.st==='taken'?'✅':'Dar'}</button>
+          <button class="mt-skip" onclick="App.medMark('${d.med.id}','${d.key}','${d.time}','skipped')" title="Omitir">✕</button>
+        </div>`).join('')}</div>
+      ${pend.length?`<p class="mt-note">Quedan <b>${pend.length}</b> ${pend.length===1?'toma':'tomas'} hoy.</p>`:'<p class="mt-note">¡Todo al día por hoy! 🎉</p>'}`
+      : `<div class="mt-empty">💊 Sin medicamentos activos hoy.<br><small>Registra un tratamiento y te aviso en cada toma.</small></div>`;
+
+    const card=(m)=>{
+      const p=this.medProgress(m), st=this.medStatus(m);
+      const end=this.medEndKey(m);
+      return `<div class="med-card ${st}">
+        <div class="mc-head">
+          <span class="mc-ico">💊</span>
+          <div><p class="mc-name">${m.name}</p>
+            <p class="mc-sub">${m.dose?m.dose+' · ':''}${m.times.length}×/día${m.reason?' · '+m.reason:''}</p></div>
+          <span class="mc-badge ${st}">${st==='active'?`Día ${p.dayN}/${p.days}`:st==='upcoming'?'Empieza '+this.prettyDay(m.start):st==='stopped'?'Suspendido':'Terminado'}</span>
+        </div>
+        <div class="mc-bar"><span style="width:${p.pct}%"></span></div>
+        <p class="mc-meta">${p.given} de ${p.total} tomas${p.skipped?` · ${p.skipped} omitida${p.skipped===1?'':'s'}`:''} · hasta el ${new Date(end+'T12:00:00').toLocaleDateString('es-CL')} · ⏰ ${m.times.join(' · ')}</p>
+        ${m.notes?`<p class="mc-notes">📝 ${m.notes.replace(/</g,'&lt;')}</p>`:''}
+        <div class="mc-actions">
+          <button onclick="App.openMedSheet('${m.id}')">✏️ Editar</button>
+          ${st==='active'||st==='upcoming'?`<button onclick="App.stopMed('${m.id}')">⏹️ Terminar</button>`:''}
+          <button onclick="App.delMed('${m.id}')">🗑️ Eliminar</button>
+        </div>
+      </div>`;
+    };
+    const act=list.filter(m=>['active','upcoming'].includes(this.medStatus(m)));
+    const fin=list.filter(m=>['done','stopped'].includes(this.medStatus(m)));
+    document.getElementById('medActive').innerHTML=act.length?act.map(card).join(''):this.emptyIllu('Sin tratamientos activos.');
+    document.getElementById('medDone').innerHTML=fin.length?fin.map(card).join(''):'<p class="sec-sub">Aquí quedará el historial de tratamientos.</p>';
+
+    // calendario: próximos 7 días
+    const k0=this.dateKey(); const days=[];
+    for(let i=0;i<7;i++) days.push(this.addDays(k0,i));
+    const rows=days.map(k=>{
+      const doses=[];
+      list.forEach(m=>{ if(this.medRunsOn(m,k)) m.times.forEach(t=>doses.push({m,t,st:this.medDoseState(m,k,t)})); });
+      if(!doses.length) return '';
+      doses.sort((a,b)=>this.minOf(a.t)-this.minOf(b.t));
+      return `<div class="cal-day">
+        <p class="cal-date">${this.prettyDay(k)}</p>
+        <div class="cal-chips">${doses.map(d=>`
+          <button class="cal-chip ${d.st}" onclick="App.medMark('${d.m.id}','${k}','${d.t}','taken')">
+            ${d.st==='taken'?'✅':d.st==='skipped'?'✕':d.st==='missed'?'⚠️':d.st==='due'?'⏰':'○'} ${d.t} ${d.m.name.split(' ')[0]}
+          </button>`).join('')}</div>
+      </div>`;
+    }).filter(Boolean).join('');
+    document.getElementById('medCal').innerHTML=rows||'<p class="sec-sub">Sin tomas programadas los próximos 7 días.</p>';
+  },
+
+  /* ══════════════════════════════════════════════════════════════════════
+     RECORDATORIOS · AGENDA DEL DÍA
+     La app avisa mientras está abierta o en segundo plano; al volver a abrirla
+     recupera las tomas atrasadas de las últimas 3 h.
+     ══════════════════════════════════════════════════════════════════════ */
+  askNotifPermission(){
+    if(window.Notification && Notification.permission==='default') Notification.requestPermission();
+  },
+  startReminders(){
+    if(this._remTimer) clearInterval(this._remTimer);
+    this._remTimer=setInterval(()=>this.checkReminders(), 30000);
+    document.addEventListener('visibilitychange',()=>{ if(!document.hidden) this.checkReminders(); });
+    this.checkReminders();
+  },
+  checkReminders(){
+    if(!this.state.pets||!this.state.pets.length) return;
+    const now=new Date(), key=this.dateKey(now), nowMin=now.getHours()*60+now.getMinutes();
+    const fired=this.state.remFired=this.state.remFired||{};
+    const s=this.state.settings; let dirty=false;
+    const WINDOW=180; // avisamos hasta 3 h después de la hora programada
+    this.state.pets.forEach(p=>{
+      if(s.medRem!==false) (p.meds||[]).forEach(m=>{
+        if(m.notify===false || m.stopped) return;
+        if(!(key>=m.start && key<=this.addDays(m.start,(+m.days||1)-1))) return;
+        (m.times||[]).forEach(t=>{
+          const id=`${p.id}|${m.id}|${key}|${t}`;
+          if(fired[id]) return;
+          const tm=this.minOf(t);
+          if(nowMin>=tm && nowMin-tm<=WINDOW && !((m.doses||{})[key+'|'+t])){
+            fired[id]=Date.now(); dirty=true;
+            this.notify(`💊 ${m.name} — ${p.name}`, `Toca la toma de las ${t}${m.dose?` · ${m.dose}`:''}`);
+            this.toast(`💊 ${p.name}: toca ${m.name} (${t})`);
+          }
+        });
+      });
+      if(s.mealRem!==false && p.meals && p.meals.times){
+        const lg=(p.meals.log||{})[key]||{};
+        p.meals.times.forEach(t=>{
+          const id=`${p.id}|meal|${key}|${t}`;
+          if(fired[id]) return;
+          const tm=this.minOf(t);
+          if(nowMin>=tm && nowMin-tm<=90 && !lg[t]){
+            fired[id]=Date.now(); dirty=true;
+            this.notify(`🍲 Hora de comer — ${p.name}`, `Comida de las ${t}${p.meals.grams?` · ${p.meals.grams} g`:''}`);
+          }
+        });
+      }
+    });
+    // limpieza: solo guardamos los avisos de los últimos 3 días
+    const cut=Date.now()-3*864e5;
+    Object.keys(fired).forEach(k=>{ if(fired[k]<cut){ delete fired[k]; dirty=true; } });
+    if(dirty) this.save();
+    if(document.getElementById('screen-home').classList.contains('active')) this.renderAgenda();
+  },
+  renderAgenda(){
+    const el=document.getElementById('agendaCard'); if(!el) return;
+    const items=[];
+    const now=new Date(), nowMin=now.getHours()*60+now.getMinutes(), key=this.dateKey();
+    this.medDosesToday().filter(d=>d.st!=='taken'&&d.st!=='skipped').forEach(d=>items.push({
+      min:this.minOf(d.time), ico:'💊', title:`${d.med.name}${d.med.dose?' · '+d.med.dose:''}`,
+      time:d.time, late:d.st==='due',
+      action:`App.medMark('${d.med.id}','${d.key}','${d.time}','taken')`, btn:'Dar'
+    }));
+    const m=this.mealsOf(); const lg=(m.log||{})[key]||{};
+    (m.times||[]).filter(t=>!lg[t]).forEach(t=>items.push({
+      min:this.minOf(t), ico:'🍲', title:'Comida', time:t, late:this.minOf(t)<nowMin,
+      action:`App.toggleMealDone('${t}')`, btn:'Listo'
+    }));
+    const vs=(this.state.vaccines||[]).map(v=>({v,n:this.vacNextDate(v)}))
+      .filter(x=>x.n&&x.n-Date.now()<7*864e5&&x.n-Date.now()>-30*864e5);
+    vs.forEach(x=>items.push({min:1e6, ico:'💉', title:`${this.vacLabel(x.v.type)} — ${new Date(x.n).toLocaleDateString('es-CL')}`,
+      time:'', late:x.n<Date.now(), action:`App.go('health')`, btn:'Ver'}));
+    if(!items.length){ el.hidden=true; return; }
+    items.sort((a,b)=>a.min-b.min);
+    el.hidden=false;
+    document.getElementById('agendaList').innerHTML=items.slice(0,5).map(i=>`
+      <div class="ag-row ${i.late?'late':''}">
+        <span class="ag-ico">${i.ico}</span>
+        <div class="ag-info"><p class="ag-title">${i.title}</p>
+          <p class="ag-time">${i.time?`${i.time}${i.late?' · atrasado':''}`:'próximamente'}</p></div>
+        <button class="ag-btn" onclick="${i.action}">${i.btn}</button>
+      </div>`).join('');
+  },
+
+  /* ══════════════════════════════════════════════════════════════════════
+     FALSOS POSITIVOS — "no era mi perro"
+     El evento sale de las estadísticas y sube el umbral de esa clase de sonido.
+     ══════════════════════════════════════════════════════════════════════ */
+  _fpTarget:null,
+  openFpSheet(id){
+    this._fpTarget=id;
+    document.getElementById('fpGrid').innerHTML=Object.entries(this.FP_REASONS).map(([k,r])=>
+      `<button class="label-btn" onclick="App.rejectEvent('${k}')">${r.e}<span>${r.l}</span></button>`).join('');
+    document.getElementById('fpBackdrop').hidden=false;
+    document.getElementById('fpSheet').hidden=false;
+  },
+  closeFpSheet(){ document.getElementById('fpBackdrop').hidden=true; document.getElementById('fpSheet').hidden=true; },
+  rejectEvent(reason){
+    const i=this.state.events.findIndex(e=>e.id===this._fpTarget);
+    if(i<0){ this.closeFpSheet(); return; }
+    const e=this.state.events.splice(i,1)[0];
+    e.fp=reason; e.fpAt=Date.now();
+    (this.state.rejected=this.state.rejected||[]).push(e);
+    // aprendizaje: subimos el umbral de la clase acústica que se equivocó
+    const cls=e.cls||e.type;
+    const fp=this.state.fpCount=this.state.fpCount||{};
+    fp[cls]=(fp[cls]||0)+1;
+    this.save();
+    this.closeFpSheet();
+    this.renderHome();
+    if(document.getElementById('screen-history').classList.contains('active')) this.renderHistory(this._histFilter||'todos');
+    const extra=this.fpBoost(cls);
+    this.toast(`Aprendido: ${this.FP_REASONS[reason].l}. Umbral de ese sonido +${Math.round(extra*100)}% 🎯`);
+  },
+  restoreEvent(id){
+    const i=(this.state.rejected||[]).findIndex(e=>e.id===id);
+    if(i<0) return;
+    const e=this.state.rejected.splice(i,1)[0];
+    const cls=e.cls||e.type;
+    if(this.state.fpCount&&this.state.fpCount[cls]) this.state.fpCount[cls]--;
+    delete e.fp; delete e.fpAt;
+    this.state.events.push(e);
+    this.state.events.sort((a,b)=>a.ts-b.ts);
+    this.save(); this.renderHistory('descartados'); this.toast('Evento restaurado ↩️');
+  },
+  fpBoost(cls){ return Math.min(0.18, 0.04*((this.state.fpCount||{})[cls]||0)); },
+  baseThreshold(){
+    return ({alta:0.22, media:0.32, baja:0.45})[this.state.settings.sensitivity||'media'];
+  },
+  setSensitivity(v){
+    this.state.settings.sensitivity=v; this.save();
+    document.querySelectorAll('#setSens .chip').forEach(c=>c.classList.toggle('sel',c.dataset.v===v));
+    this.toast(v==='baja'?'Solo se registrarán sonidos muy claros 🔇':v==='alta'?'Máxima sensibilidad: puede haber falsos positivos 🔊':'Sensibilidad equilibrada 🎚️');
+  },
+
+  /* ══════════════════════════════════════════════════════════════════════
+     MICRÓFONO ACTIVO — aviso visible en la pestaña y en la bandeja
+     ══════════════════════════════════════════════════════════════════════ */
+  micIndicator(on){
+    const bar=document.getElementById('micBar');
+    if(on){
+      if(bar) bar.hidden=false;
+      document.body.classList.add('mic-on');
+      if(!this._titleTimer){
+        this._baseTitle=this._baseTitle||document.title;
+        let flip=false;
+        this._titleTimer=setInterval(()=>{
+          flip=!flip;
+          document.title = flip ? '🔴 Micrófono ENCENDIDO · DogTalk' : '🎙️ Escuchando a tu perro…';
+        }, 1500);
+      }
+      this._persistNotif(true);
+      if(!this._beforeUnload){
+        this._beforeUnload=(e)=>{ if(this.listening){ e.preventDefault(); e.returnValue=''; } };
+        window.addEventListener('beforeunload', this._beforeUnload);
+      }
+    } else {
+      if(bar) bar.hidden=true;
+      document.body.classList.remove('mic-on');
+      if(this._titleTimer){ clearInterval(this._titleTimer); this._titleTimer=null; }
+      document.title=this._baseTitle||'DogTalk AI — Traductor de ladridos';
+      this._persistNotif(false);
+    }
+  },
+  _persistNotif(on){
+    if(!window.Notification || Notification.permission!=='granted') return;
+    const opts={ body:'DogTalk está escuchando a tu perro. Toca para volver y detenerlo.',
+      tag:'dogtalk-mic', icon:'icon-192.png', badge:'icon-192.png', requireInteraction:true, silent:true };
+    if(navigator.serviceWorker && navigator.serviceWorker.ready){
+      navigator.serviceWorker.ready.then(reg=>{
+        if(on) reg.showNotification('🔴 Micrófono encendido', opts);
+        else reg.getNotifications({tag:'dogtalk-mic'}).then(ns=>ns.forEach(n=>n.close()));
+      }).catch(()=>{});
+    } else if(on){
+      try{ this._micNotif=new Notification('🔴 Micrófono encendido', opts); }catch(e){}
+    } else if(this._micNotif){ this._micNotif.close(); this._micNotif=null; }
+  },
+
+  /* ══════════════════════════════════════════════════════════════════════
+     CUENTA LOCAL Y PRUEBA GRATIS DE 1 DÍA
+     ⚠️ El login es local (localStorage) y decorativo: no hay servidor que
+     valide nada. Sirve para separar perfiles en el dispositivo, no como
+     medida de seguridad real.
+     ══════════════════════════════════════════════════════════════════════ */
+  DEMO_USER:{email:'t.callealta@gmail.com', name:'Tomás Callealta', pass:'123456', plan:'familiar'},
+  TRIAL_MS:864e5, // 24 horas
+  h32(s){ let h=0x811c9dc5; for(let i=0;i<String(s).length;i++){ h^=String(s).charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; } return h.toString(16); },
+  seedDemo(){
+    this.state.users=this.state.users||{};
+    const d=this.DEMO_USER;
+    if(!this.state.users[d.email]){
+      this.state.users[d.email]={name:d.name, ph:this.h32(d.pass), plan:d.plan, created:Date.now(), trialStart:null};
+      this.save();
+    }
+  },
+  isPro(){ return this.state.plan==='premium'||this.state.plan==='familiar'; },
+  trialLeft(){ if(!this.state.trialStart) return this.TRIAL_MS; return Math.max(0, this.state.trialStart+this.TRIAL_MS-Date.now()); },
+  trialExpired(){ return !this.isPro() && this.trialLeft()<=0; },
+  trialLabel(){
+    const ms=this.trialLeft();
+    if(ms<=0) return 'Prueba terminada';
+    const h=Math.floor(ms/36e5), m=Math.floor(ms%36e5/6e4);
+    return h>0?`${h} h ${m} min`:`${m} min`;
+  },
+  _loginMode:'login',
+  swapLoginMode(){
+    this._loginMode = this._loginMode==='login'?'signup':'login';
+    const s=this._loginMode==='signup';
+    document.getElementById('logTitle').textContent=s?'Crear cuenta':'Entrar';
+    document.getElementById('logBtn').textContent=s?'Crear cuenta y probar gratis':'Entrar';
+    document.getElementById('logSwap').textContent=s?'Ya tengo cuenta':'Crear una cuenta nueva';
+    document.getElementById('logNameWrap').hidden=!s;
+  },
+  doLogin(){
+    const mail=document.getElementById('logMail').value.trim().toLowerCase();
+    const pass=document.getElementById('logPass').value;
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)){ this.toast('Escribe un correo válido 📧'); return; }
+    if(pass.length<6){ this.toast('La contraseña necesita al menos 6 caracteres 🔒'); return; }
+    this.state.users=this.state.users||{};
+    const u=this.state.users[mail];
+    if(this._loginMode==='signup'){
+      if(u){ this.toast('Ese correo ya tiene cuenta aquí. Entra con tu contraseña.'); return; }
+      const name=document.getElementById('logName').value.trim()||mail.split('@')[0];
+      this.state.users[mail]={name, ph:this.h32(pass), plan:'free', created:Date.now(), trialStart:Date.now()};
+    } else {
+      if(!u){ this.toast('No hay cuenta con ese correo en este dispositivo 🤔'); return; }
+      if(u.ph!==this.h32(pass)){ this.toast('Contraseña incorrecta 🔒'); return; }
+      if(u.plan!=='premium'&&u.plan!=='familiar'&&!u.trialStart) u.trialStart=Date.now();
+    }
+    const usr=this.state.users[mail];
+    this.state.session=mail;
+    this.state.plan=usr.plan;
+    this.state.trialStart=usr.trialStart;
+    this.state.account={...(this.state.account||{}), name:usr.name, email:mail,
+      card:(this.state.account||{}).card||null, autoRenew:true, since:usr.created, invoices:(this.state.account||{}).invoices||[]};
+    this.save();
+    this.confetti();
+    this.toast(this.isPro()?`¡Hola ${usr.name}! Plan ${this.PLANS[usr.plan].name} activo ⭐`:`¡Bienvenido! Tienes 24 h de prueba gratis 🎁`);
+    this.state.pet ? this.go('home') : this.go('petform');
+    this.renderTrial();
+  },
+  logout(){
+    if(!confirm('¿Cerrar sesión? Los datos de tus perros quedan en este dispositivo.')) return;
+    this.state.session=null; this.save();
+    document.getElementById('logPass').value='';
+    this.go('login');
+  },
+  changePassword(){
+    const mail=this.state.session;
+    if(!mail){ this.toast('Primero inicia sesión'); return; }
+    const cur=prompt('Contraseña actual:'); if(cur===null) return;
+    if(this.state.users[mail].ph!==this.h32(cur)){ this.toast('Contraseña incorrecta 🔒'); return; }
+    const nw=prompt('Nueva contraseña (mínimo 6 caracteres):'); if(nw===null) return;
+    if(nw.length<6){ this.toast('Muy corta, mínimo 6 caracteres'); return; }
+    this.state.users[mail].ph=this.h32(nw); this.save();
+    this.toast('Contraseña actualizada 🔒');
+  },
+  syncUserPlan(){
+    const mail=this.state.session;
+    if(mail&&this.state.users&&this.state.users[mail]){
+      this.state.users[mail].plan=this.state.plan;
+      this.state.users[mail].trialStart=this.state.trialStart;
+    }
+  },
+  // pantallas que exigen plan pagado (usan micrófono, cámara o modelos de IA)
+  PRO_SCREENS:['listen','translate','camera','absence','wrapped'],
+  FREE_ALWAYS:['onboarding','login','petform','home','subscription','account','settings'],
+  gate(name){
+    if(this.isPro()) return true;
+    if(this.PRO_SCREENS.includes(name)){ this.paywall('pro'); return false; }
+    if(this.trialExpired() && !this.FREE_ALWAYS.includes(name)){ this.paywall('trial'); return false; }
+    return true;
+  },
+  requirePro(what){
+    if(this.isPro()) return true;
+    this.paywall('pro', what);
+    return false;
+  },
+  paywall(kind, what){
+    if(kind==='pro') this.toast(`🎙️ ${what||'La escucha con IA'} es parte de Premium. La prueba gratis registra eventos y salud.`);
+    else this.toast('Tu prueba gratis de 1 día terminó ⏳ Activa un plan para seguir.');
+    this.go('subscription');
+  },
+  renderTrial(){
+    const el=document.getElementById('trialBanner'); if(!el) return;
+    if(this.isPro()){ el.hidden=true; return; }
+    el.hidden=false;
+    const left=this.trialLeft();
+    el.className='trial-banner'+(left<=0?' over':left<6*36e5?' soon':'');
+    el.innerHTML = left>0
+      ? `<span class="tb-ico">🎁</span><div><b>Prueba gratis · quedan ${this.trialLabel()}</b>
+         <small>Incluye eventos, salud, comidas, peso y medicamentos. La escucha con IA es Premium.</small></div><span class="tb-arrow">›</span>`
+      : `<span class="tb-ico">⏳</span><div><b>Tu prueba de 1 día terminó</b>
+         <small>Activa Premium o Familiar para seguir usando DogTalk.</small></div><span class="tb-arrow">›</span>`;
   },
 
   /* ---------- init ---------- */
@@ -2206,8 +3319,29 @@ ${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<tr><td>${SOUND_TY
     // settings persist
     const sn=document.getElementById('setNotif'), sa=document.getElementById('setAutoListen');
     sn.checked=this.state.settings.notif; sa.checked=this.state.settings.autoListen;
-    sn.onchange=()=>{this.state.settings.notif=sn.checked; this.save();};
+    sn.onchange=()=>{this.state.settings.notif=sn.checked; this.save(); if(sn.checked) this.askNotifPermission();};
     sa.onchange=()=>{this.state.settings.autoListen=sa.checked; this.save();};
+    const sm=document.getElementById('setMedRem'), sf=document.getElementById('setMealRem');
+    sm.checked=this.state.settings.medRem!==false; sf.checked=this.state.settings.mealRem!==false;
+    sm.onchange=()=>{this.state.settings.medRem=sm.checked; this.save(); if(sm.checked) this.askNotifPermission();};
+    sf.onchange=()=>{this.state.settings.mealRem=sf.checked; this.save(); if(sf.checked) this.askNotifPermission();};
+    // sensibilidad de detección (contra falsos positivos)
+    const sens=document.getElementById('setSens');
+    if(sens){
+      sens.querySelectorAll('.chip').forEach(c=>c.classList.toggle('sel', c.dataset.v===(this.state.settings.sensitivity||'media')));
+      sens.addEventListener('click',e=>{ if(e.target.classList.contains('chip')) this.setSensitivity(e.target.dataset.v); });
+    }
+    // sheets de síntomas: hora personalizada
+    const sw=document.getElementById('symWhen');
+    if(sw) sw.addEventListener('click',e=>{
+      if(!e.target.classList.contains('chip')) return;
+      const cst=document.getElementById('symWhenCustom');
+      cst.hidden = e.target.dataset.v!=='custom';
+      if(!cst.hidden && !cst.value){
+        const n=new Date(); n.setMinutes(n.getMinutes()-n.getTimezoneOffset());
+        cst.value=n.toISOString().slice(0,16);
+      }
+    });
     // mascota interactiva
     const mascot=document.getElementById('mascot');
     if(mascot) mascot.addEventListener('click',()=>{
@@ -2221,12 +3355,31 @@ ${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<tr><td>${SOUND_TY
       const p=this.state.pet;
       document.getElementById('petName').value=p.name||'';
       document.getElementById('petBreed').value=p.breed||'';
-      document.getElementById('petAge').value=p.age||'';
+      document.getElementById('petBirth').value=p.birth||'';
+      document.getElementById('petAgeY').value=p.ageY!=null?p.ageY:'';
+      document.getElementById('petAgeM').value=p.ageM!=null?p.ageM:'';
       document.getElementById('petWeight').value=p.weight||'';
       document.getElementById('petMedical').value=p.medical||'';
+      ['petSex','petActivity','petNeutered'].forEach(g=>{
+        const v={petSex:p.sex, petActivity:p.activity, petNeutered:p.neutered}[g];
+        document.querySelectorAll(`#${g} .chip`).forEach(c=>c.classList.toggle('sel', c.dataset.v===v));
+      });
+      p.birth ? this.onBirthChange() : this.onManualAge();
       if(p.photo) document.getElementById('photoPicker').innerHTML=`<img src="${p.photo}">`;
-      this.go('home');
     }
+    // sesión: sin cuenta iniciada mostramos el login
+    if(this.state.session && this.state.users[this.state.session]){
+      const u=this.state.users[this.state.session];
+      this.state.plan=u.plan; this.state.trialStart=u.trialStart;
+      document.getElementById('logMail').value=this.state.session;
+      this.state.pet ? this.go('home') : this.go('petform');
+    } else if(this.state.pet){
+      document.getElementById('logMail').value=(this.state.account||{}).email||'';
+      this.go('login');
+    }
+    this.startReminders();
+    // el banner de prueba se refresca cada minuto
+    setInterval(()=>{ if(document.getElementById('screen-home').classList.contains('active')) this.renderTrial(); }, 60000);
     // restaurar UI de modo ausencia si quedó activo
     if(this.state.absence&&this.state.absence.active){
       const btn=document.getElementById('absBtn');

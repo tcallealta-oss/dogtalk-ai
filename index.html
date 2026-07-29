@@ -18,6 +18,13 @@
 </head>
 <body>
 
+<!-- AVISO PERSISTENTE: MICRÓFONO ENCENDIDO -->
+<div class="mic-bar" id="micBar" hidden>
+  <span class="mb-dot"></span>
+  <span class="mb-txt">Micrófono <b>ENCENDIDO</b> — DogTalk está escuchando</span>
+  <button class="mb-stop" onclick="App.stopListen()">Detener</button>
+</div>
+
 <!-- ONBOARDING -->
 <section id="screen-onboarding" class="screen active">
   <div class="floaties" aria-hidden="true">
@@ -51,8 +58,31 @@
       <div class="ob-card"><span>🧠</span><p>La IA aprende los patrones específicos de tu mascota</p></div>
       <div class="ob-card"><span>🔔</span><p>Recibe alertas: "Rocky probablemente quiere salir (87%)"</p></div>
     </div>
-    <button class="btn-primary" onclick="App.go('petform')">Comenzar</button>
-    <button class="btn-ghost" onclick="App.skipOnboarding()">Ya tengo cuenta</button>
+    <button class="btn-primary" onclick="App.go('login')">Comenzar</button>
+    <button class="btn-ghost" onclick="App.go('login')">Ya tengo cuenta</button>
+  </div>
+</section>
+
+<!-- LOGIN / REGISTRO -->
+<section id="screen-login" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('onboarding')">←</button><h2 id="logTitle">Entrar</h2></header>
+  <div class="content">
+    <div class="login-hero">🐾</div>
+    <label>Correo</label>
+    <input id="logMail" type="email" inputmode="email" autocomplete="username" placeholder="tucorreo@mail.com">
+    <label>Contraseña</label>
+    <input id="logPass" type="password" autocomplete="current-password" placeholder="••••••">
+    <div id="logNameWrap" hidden>
+      <label>Tu nombre</label>
+      <input id="logName" placeholder="Ej: Tomás">
+    </div>
+    <button class="btn-primary" id="logBtn" onclick="App.doLogin()">Entrar</button>
+    <button class="btn-ghost" id="logSwap" onclick="App.swapLoginMode()">Crear una cuenta nueva</button>
+    <p class="login-note">🔒 Tu cuenta y los datos de tus perros se guardan <b>solo en este dispositivo</b>. No hay servidor: nadie más puede verlos.</p>
+    <div class="trial-pitch">
+      <p><b>Prueba gratis de 1 día</b></p>
+      <p class="tp-sub">Registra eventos, salud, comidas, peso y medicamentos durante 24 h. La escucha con IA, el traductor y la cámara son parte de Premium.</p>
+    </div>
   </div>
 </section>
 
@@ -67,14 +97,23 @@
     <input type="file" id="petPhoto" accept="image/*" hidden>
     <label>Nombre</label><input id="petName" placeholder="Ej: Rocky">
     <label>Raza</label><input id="petBreed" placeholder="Ej: Salchicha">
+    <label>Fecha de nacimiento</label>
+    <input type="date" id="petBirth" onchange="App.onBirthChange()">
+    <p class="field-hint" id="ageHint">Con la fecha exacta la edad se actualiza sola y afinamos ración, etapa vital y consejos del Vet IA.</p>
     <div class="row2">
-      <div><label>Edad (años)</label><input id="petAge" type="number" min="0" step="0.5" placeholder="3"></div>
-      <div><label>Peso (kg)</label><input id="petWeight" type="number" min="0" step="0.1" placeholder="9.5"></div>
+      <div><label>Edad — años</label><input id="petAgeY" type="number" min="0" max="30" step="1" placeholder="3" oninput="App.onManualAge()"></div>
+      <div><label>… y meses</label><input id="petAgeM" type="number" min="0" max="11" step="1" placeholder="4" oninput="App.onManualAge()"></div>
     </div>
+    <label>Peso actual (kg)</label><input id="petWeight" type="number" min="0" step="0.1" placeholder="9.5">
     <label>Sexo</label>
     <div class="chip-row" id="petSex">
       <button class="chip" data-v="macho">♂ Macho</button>
       <button class="chip" data-v="hembra">♀ Hembra</button>
+    </div>
+    <label>¿Está esterilizado/a?</label>
+    <div class="chip-row" id="petNeutered">
+      <button class="chip" data-v="si">✂️ Sí</button>
+      <button class="chip" data-v="no">🚫 No</button>
     </div>
     <label>Nivel de actividad</label>
     <div class="chip-row" id="petActivity">
@@ -100,6 +139,7 @@
   </header>
   <div class="pet-switch" id="petSwitch" hidden></div>
   <div class="content">
+    <div class="trial-banner" id="trialBanner" hidden onclick="App.go('subscription')"></div>
     <div class="mood-card" id="moodCard">
       <p class="mood-label">Estado emocional estimado</p>
       <div class="mood-value" id="moodValue">😊 Tranquilo</div>
@@ -120,6 +160,10 @@
       <span class="wb-txt">El año de <b id="wbName">tu perro</b><small>Su Wrapped anual · listo para compartir</small></span>
       <span class="tb-arrow">›</span>
     </button>
+    <div class="agenda-card" id="agendaCard" hidden>
+      <div class="agenda-head"><span>🗓️</span><h3>Hoy toca</h3><button class="agenda-all" onclick="App.go('meds')">Ver todo ›</button></div>
+      <div class="agenda-list" id="agendaList"></div>
+    </div>
     <div class="predict-card" id="predictCard" onclick="App.go('stats')">
       <span class="predict-ico">🔮</span>
       <div><p class="predict-title">Predicción de necesidades</p><p class="predict-text" id="predictText">Aprendiendo la rutina…</p></div>
@@ -130,6 +174,10 @@
       <button class="quick" onclick="App.go('vet')"><span>🩺</span>Vet IA</button>
       <button class="quick" onclick="App.go('food')"><span>🍽️</span>¿Puede comer?</button>
       <button class="quick" onclick="App.go('health')"><span>💉</span>Carnet y vacunas</button>
+      <button class="quick" onclick="App.go('meds')"><span>💊</span>Medicamentos</button>
+      <button class="quick" onclick="App.go('symptoms')"><span>🤒</span>Malestares</button>
+      <button class="quick" onclick="App.go('meals')"><span>🍲</span>Comidas</button>
+      <button class="quick" onclick="App.go('weight')"><span>⚖️</span>Peso</button>
       <button class="quick" onclick="App.go('absence')"><span>🏠</span>Modo Ausencia</button>
       <button class="quick" onclick="App.openLabelSheet(null)"><span>➕</span>Registrar evento</button>
       <button class="quick" onclick="App.go('history')"><span>📋</span>Historial</button>
@@ -158,6 +206,15 @@
     </div>
     <p class="listen-status" id="listenStatus">Toca el micrófono para empezar a escuchar</p>
     <div class="ai-status" id="aiStatus">Cargando modelo de IA…</div>
+    <div class="sens-box">
+      <p class="sens-lbl">🎚️ Sensibilidad de detección</p>
+      <div class="chip-row" id="setSens">
+        <button class="chip" data-v="baja">🔇 Baja</button>
+        <button class="chip sel" data-v="media">⚖️ Media</button>
+        <button class="chip" data-v="alta">🔊 Alta</button>
+      </div>
+      <p class="sens-hint">¿Se cuelan sonidos de la TV o de otros perros? Baja la sensibilidad y marca 🚫 <b>No era él</b> en los eventos equivocados: el umbral de ese sonido sube solo.</p>
+    </div>
     <div class="detect-feed" id="detectFeed"></div>
     <button class="btn-ghost" onclick="App.simulateDetection()">🧪 Simular detección (demo)</button>
   </div>
@@ -194,6 +251,13 @@
   <div class="content">
     <div class="vac-status" id="vacStatus"></div>
 
+    <div class="health-links">
+      <button class="hl" onclick="App.go('meds')"><span>💊</span>Medicamentos<small id="hlMeds"></small></button>
+      <button class="hl" onclick="App.go('symptoms')"><span>🤒</span>Malestares<small id="hlSym"></small></button>
+      <button class="hl" onclick="App.go('weight')"><span>⚖️</span>Peso<small id="hlW"></small></button>
+      <button class="hl" onclick="App.go('meals')"><span>🍲</span>Comidas<small id="hlMeals"></small></button>
+    </div>
+
     <h3 class="section-title">Carnet vacunatorio</h3>
     <div class="carnet-grid" id="carnetGrid"></div>
     <input type="file" id="carnetFile" accept="image/*" hidden multiple>
@@ -227,6 +291,148 @@
     <button class="btn-ghost" onclick="App.closeVacSheet()">Cancelar</button>
   </div>
 </div>
+
+<!-- MEDICAMENTOS Y CALENDARIO -->
+<section id="screen-meds" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Medicamentos 💊</h2></header>
+  <div class="content">
+    <div class="med-today" id="medToday"></div>
+
+    <h3 class="section-title">Tratamientos activos</h3>
+    <div id="medActive" class="med-list"></div>
+    <button class="btn-primary" onclick="App.openMedSheet()">➕ Nuevo medicamento</button>
+
+    <h3 class="section-title">Calendario de tomas</h3>
+    <div class="med-cal" id="medCal"></div>
+
+    <h3 class="section-title">Tratamientos terminados</h3>
+    <div id="medDone" class="med-list"></div>
+  </div>
+</section>
+
+<!-- SHEET: nuevo medicamento -->
+<div class="sheet-backdrop" id="medBackdrop" hidden onclick="App.closeMedSheet()"></div>
+<div class="sheet sheet-tall" id="medSheet" hidden>
+  <div class="sheet-handle"></div>
+  <h3 id="medSheetTitle">Nuevo medicamento</h3>
+  <div class="vac-form">
+    <label>Nombre del medicamento</label>
+    <input id="medName" list="medSuggest" placeholder="Ej: Amoxicilina 250 mg">
+    <datalist id="medSuggest"></datalist>
+    <label>Dosis por toma</label>
+    <input id="medDose" placeholder="Ej: 1 comprimido / 2,5 ml">
+    <label>¿Para qué es? (opcional)</label>
+    <input id="medReason" placeholder="Ej: infección de oído">
+    <div class="row2">
+      <div><label>Veces al día</label>
+        <select id="medFreq" onchange="App.medFreqChanged()">
+          <option value="1">1 vez (cada 24 h)</option>
+          <option value="2" selected>2 veces (cada 12 h)</option>
+          <option value="3">3 veces (cada 8 h)</option>
+          <option value="4">4 veces (cada 6 h)</option>
+          <option value="0">Otra pauta</option>
+        </select></div>
+      <div><label>Durante (días)</label><input id="medDays" type="number" min="1" max="365" value="7"></div>
+    </div>
+    <label>Horarios de las tomas</label>
+    <div class="time-row" id="medTimes"></div>
+    <label>Primer día</label>
+    <input type="date" id="medStart">
+    <label class="switch-line"><span>🔔 Avisarme en cada toma</span>
+      <span class="switch"><input type="checkbox" id="medNotify" checked><span class="slider"></span></span></label>
+    <label>Notas (opcional)</label>
+    <textarea id="medNotes" placeholder="Ej: dar con comida, no partir el comprimido…"></textarea>
+    <button class="btn-primary" onclick="App.saveMed()">Guardar tratamiento</button>
+    <button class="btn-ghost" onclick="App.closeMedSheet()">Cancelar</button>
+  </div>
+</div>
+
+<!-- REGISTRO DE MALESTARES / SÍNTOMAS -->
+<section id="screen-symptoms" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Registro de salud 🤒</h2></header>
+  <div class="content">
+    <div class="sym-verdict" id="symVerdict"></div>
+    <h3 class="section-title">¿Qué le pasó?</h3>
+    <p class="sec-sub">Toca un síntoma para registrarlo con la hora exacta.</p>
+    <div class="sym-grid" id="symGrid"></div>
+    <h3 class="section-title">Episodios de los últimos 7 días</h3>
+    <div class="sym-timeline" id="symTimeline"></div>
+    <h3 class="section-title">Historial completo</h3>
+    <div class="sym-list" id="symList"></div>
+  </div>
+</section>
+
+<!-- SHEET: detalle del síntoma -->
+<div class="sheet-backdrop" id="symBackdrop" hidden onclick="App.closeSymSheet()"></div>
+<div class="sheet sheet-tall" id="symSheet" hidden>
+  <div class="sheet-handle"></div>
+  <h3 id="symSheetTitle">Registrar malestar</h3>
+  <p class="sheet-sub" id="symSheetSub"></p>
+  <div class="vac-form">
+    <label>¿Cuándo ocurrió?</label>
+    <div class="chip-row" id="symWhen">
+      <button class="chip sel" data-v="0">Ahora</button>
+      <button class="chip" data-v="60">Hace 1 h</button>
+      <button class="chip" data-v="180">Hace 3 h</button>
+      <button class="chip" data-v="custom">Otra hora</button>
+    </div>
+    <input type="datetime-local" id="symWhenCustom" hidden>
+    <label>Intensidad</label>
+    <div class="chip-row" id="symSeverity">
+      <button class="chip sel" data-v="leve">🟢 Leve</button>
+      <button class="chip" data-v="moderado">🟡 Moderado</button>
+      <button class="chip" data-v="grave">🔴 Grave</button>
+    </div>
+    <label>Notas (opcional)</label>
+    <textarea id="symNote" placeholder="Ej: comió pasto antes, color amarillento…"></textarea>
+    <button class="btn-primary" onclick="App.saveSymptom()">Registrar</button>
+    <button class="btn-ghost" onclick="App.closeSymSheet()">Cancelar</button>
+  </div>
+</div>
+
+<!-- RUTINA DE COMIDAS -->
+<section id="screen-meals" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Comidas 🍲</h2></header>
+  <div class="content">
+    <div class="meal-hero" id="mealHero"></div>
+
+    <h3 class="section-title">Horarios de comida</h3>
+    <p class="sec-sub">Marca cada toma cuando tu perro coma. Te avisamos a la hora.</p>
+    <div class="meal-times" id="mealTimes"></div>
+    <div class="meal-add">
+      <input type="time" id="newMealTime" value="08:00">
+      <button class="btn-ghost" onclick="App.addMealTime()">➕ Agregar horario</button>
+    </div>
+
+    <h3 class="section-title">Ración</h3>
+    <div class="meal-ration" id="mealRation"></div>
+    <label>Gramos por toma (opcional)</label>
+    <div class="meal-add">
+      <input type="number" id="mealGrams" min="0" step="5" placeholder="Ej: 120">
+      <button class="btn-ghost" onclick="App.saveMealGrams()">Guardar</button>
+    </div>
+
+    <h3 class="section-title">Últimos 7 días</h3>
+    <div class="meal-week" id="mealWeek"></div>
+  </div>
+</section>
+
+<!-- PESO -->
+<section id="screen-weight" class="screen">
+  <header class="topbar"><button class="back" onclick="App.go('home')">←</button><h2>Control de peso ⚖️</h2></header>
+  <div class="content">
+    <div class="w-hero" id="wHero"></div>
+    <div class="w-chart" id="wChart"></div>
+    <div class="meal-add">
+      <input type="number" id="wKg" min="0" step="0.1" placeholder="Peso en kg">
+      <input type="date" id="wDate">
+      <button class="btn-primary btn-inline" onclick="App.saveWeight()">Registrar</button>
+    </div>
+    <div class="w-note" id="wNote"></div>
+    <h3 class="section-title">Historial</h3>
+    <div class="w-list" id="wList"></div>
+  </div>
+</section>
 
 <!-- TRADUCTOR EN TIEMPO REAL -->
 <section id="screen-translate" class="screen">
@@ -280,6 +486,7 @@
       <button class="chip" data-v="gemido">Gemidos</button>
       <button class="chip" data-v="gruñido">Gruñidos</button>
       <button class="chip" data-v="aullido">Aullidos</button>
+      <button class="chip" data-v="descartados">🚫 Descartados</button>
     </div>
     <div id="historyList" class="event-list"></div>
   </div>
@@ -418,10 +625,14 @@
     <div class="setting-row" onclick="App.go('account')"><span>👤 Mi cuenta y suscripción</span><span>›</span></div>
     <div class="setting-row" onclick="App.go('petform')"><span>🐶 Editar perfil de mascota</span><span>›</span></div>
     <div class="setting-row"><span>🔔 Notificaciones</span><label class="switch"><input type="checkbox" id="setNotif" checked><span class="slider"></span></label></div>
+    <div class="setting-row"><span>💊 Alarma de medicamentos</span><label class="switch"><input type="checkbox" id="setMedRem" checked><span class="slider"></span></label></div>
+    <div class="setting-row"><span>🍲 Recordatorio de comidas</span><label class="switch"><input type="checkbox" id="setMealRem" checked><span class="slider"></span></label></div>
     <div class="setting-row"><span>🎙️ Escucha automática al abrir</span><label class="switch"><input type="checkbox" id="setAutoListen"><span class="slider"></span></label></div>
+    <div class="setting-row" onclick="App.changePassword()"><span>🔒 Cambiar contraseña</span><span>›</span></div>
     <div class="setting-row" onclick="App.exportData()"><span>📦 Exportar mis datos (JSON)</span><span>›</span></div>
+    <div class="setting-row" onclick="App.logout()"><span>🚪 Cerrar sesión</span><span>›</span></div>
     <div class="setting-row danger" onclick="App.resetAll()"><span>🗑️ Borrar todos los datos</span><span>›</span></div>
-    <p class="version">DogTalk AI v0.1.0 — MVP</p>
+    <p class="version">DogTalk AI v1.0 — salud diaria</p>
   </div>
 </section>
 
@@ -443,6 +654,16 @@
     <button class="label-btn" data-m="emocionado">🤩<span>Está emocionado</span></button>
   </div>
   <button class="btn-ghost" onclick="App.closeSheet()">Cancelar</button>
+</div>
+
+<!-- SHEET: marcar falso positivo -->
+<div class="sheet-backdrop" id="fpBackdrop" hidden onclick="App.closeFpSheet()"></div>
+<div class="sheet" id="fpSheet" hidden>
+  <div class="sheet-handle"></div>
+  <h3>No era mi perro 🚫</h3>
+  <p class="sheet-sub">¿Qué sonó en realidad? Con esto subimos el umbral de ese sonido y dejamos de contarlo.</p>
+  <div class="label-grid" id="fpGrid"></div>
+  <button class="btn-ghost" onclick="App.closeFpSheet()">Cancelar</button>
 </div>
 
 <div class="toast" id="toast" hidden></div>
