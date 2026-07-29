@@ -411,6 +411,35 @@ const App = {
     this.addEvent(t, 0.55+Math.random()*0.4, ac);
   },
 
+  /* ══════ CALCULADORA DE RACIÓN ══════
+     Fórmula veterinaria estándar: RER = 70 × peso^0.75 ; MER = RER × factor
+     El factor depende de edad, esterilización y nivel de actividad. */
+  rationAdvice(p){
+    const w=parseFloat(p.weight), age=parseFloat(p.age);
+    if(!w||w<=0) return `Para calcular la ración de ${p.name} necesito su <b>peso</b>. Agrégalo en su perfil (⚙️ → Editar perfil de mascota) y vuelve a preguntarme.
+<br><br>Como referencia general: un perro adulto come entre el <b>2% y 3% de su peso corporal</b> al día en alimento seco, repartido en 2 tomas.`;
+    const rer=70*Math.pow(w,0.75);
+    let factor, etapa;
+    if(age&&age<0.34){ factor=3.0; etapa='cachorro menor de 4 meses'; }
+    else if(age&&age<1){ factor=2.0; etapa='cachorro de 4 a 12 meses'; }
+    else if(age&&age>=8){ factor=1.4; etapa='adulto senior'; }
+    else if(p.activity==='alto'){ factor=1.8; etapa='adulto muy activo'; }
+    else if(p.activity==='bajo'){ factor=1.4; etapa='adulto poco activo'; }
+    else { factor=1.6; etapa='adulto con actividad media'; }
+    const mer=Math.round(rer*factor);
+    // alimento seco típico: 3.500–4.000 kcal/kg → usamos 3.700 kcal/kg = 3,7 kcal/g
+    const gr=Math.round(mer/3.7);
+    const tomas=(age&&age<0.5)?4:(age&&age<1)?3:2;
+    return `Para <b>${p.name}</b> (${w} kg, ${etapa}):
+<br><br>🔥 <b>Necesidad energética:</b> ~${mer} kcal al día
+<br>🥣 <b>Alimento seco:</b> aproximadamente <b>${gr} g diarios</b>, repartidos en <b>${tomas} tomas</b> (~${Math.round(gr/tomas)} g por comida)
+<br><br><b>Importante:</b> es una estimación con la fórmula estándar (RER ${Math.round(rer)} kcal × factor ${factor}). Ajusta según:
+<br>• Las <b>kcal reales de tu alimento</b> — vienen en el saco y varían bastante entre marcas.
+<br>• Su <b>condición corporal</b>: deberías palpar las costillas sin apretar y verle cintura desde arriba. Si no, baja la ración un 10%.
+<br>• Los <b>premios</b> no deben superar el 10% del total diario.
+<br><br>Pésalo cada 2–4 semanas para verificar que va bien.`;
+  },
+
   /* ══════ ¿PUEDE COMER? — guía toxicológica canina ══════
      Niveles: peligro (tóxico, urgencia) · precaucion (riesgo o solo en poca cantidad) · seguro */
   FOODS:[
@@ -834,9 +863,67 @@ ${p.age&&p.age>=7?`<br><br>A los ${p.age} años conviene un alimento senior con 
      r:p=>`La enfermedad periodontal afecta a la mayoría de los perros desde los 3 años y puede repercutir en corazón y riñones.
 <br><br><b>Señales:</b> mal aliento persistente, sarro visible, encías rojas o sangrantes, dificultad para masticar.
 <br><br><b>Prevención:</b> cepillado con pasta dental canina (nunca humana), snacks dentales y limpieza profesional cuando el veterinario lo indique.`},
-    {k:['calor','celo','castr','esteriliz','preñ'],t:'reproductivo',
+    {k:['en celo','celo','castr','esteriliz','preñ','monta','cruzar'],t:'reproductivo',
      r:p=>`La esterilización previene tumores mamarios, piometra y problemas prostáticos, y reduce conductas de vagabundeo y marcaje.
 <br><br>El momento óptimo varía según tamaño y sexo — en razas grandes suele recomendarse esperar al cierre de las placas de crecimiento. Conversa el mejor timing para ${p.name} con tu veterinario.`},
+    {k:['cuanto come','cuanta comida','cuanta comida le doy','racion','ración','cuanto debe comer','cuanto le doy','gramos','porcion','cuanto darle','cuanto tiene que comer'],t:'ración',
+     r:p=>App.rationAdvice(p)},
+    {k:['cachorro','puppy','bebe','recien nacido','meses de vida'],t:'cachorro',
+     r:p=>`<b>Claves de los primeros meses:</b>
+<br><br>• <b>Vacunas:</b> séxtuple desde las 6–8 semanas con refuerzos cada 21 días hasta las 16 semanas; antirrábica a los 3–4 meses. Hasta completar el esquema, evita plazas y contacto con perros desconocidos.
+<br>• <b>Desparasitación:</b> cada 15 días hasta los 3 meses, luego mensual hasta los 6.
+<br>• <b>Socialización:</b> la ventana crítica va de las 3 a las 14 semanas. Exponerlo con calma a ruidos, personas, superficies y otros perros sanos previene miedos de adulto.
+<br>• <b>Mordidas:</b> normal en la dentición. Si muerde fuerte, detén el juego unos segundos: aprende a inhibir la fuerza.
+<br>• <b>Comidas:</b> 3–4 veces al día hasta los 6 meses.
+<br><br>Pregúntame "cuánta comida" y te calculo su ración según peso.`},
+    {k:['calor','golpe de calor','hace mucho calor','mucho calor','hace calor','verano','asfalto','deshidrat','sol fuerte'],t:'calor',urgent:['jadea sin parar','colaps','no responde'],
+     r:p=>`Los perros no sudan: solo regulan por jadeo, así que el <b>golpe de calor</b> es una urgencia real y frecuente.
+<br><br>• <b>Nunca</b> lo dejes en el auto, ni con ventanas abiertas: en 10 minutos el interior es letal.
+<br>• Pasea temprano o al atardecer. Prueba el asfalto con el dorso de tu mano 7 segundos: si te quema, le quema las almohadillas.
+<br>• Señales de alerta: jadeo extremo, babeo espeso, encías rojo intenso, tambaleo, vómitos.
+<br>• <b>Primeros auxilios:</b> a la sombra, agua fresca (no helada) en patas, ingle y cuello, y al veterinario de inmediato.
+${p.breed&&/bulldog|pug|boxer|shih|pekines|braquic/i.test(p.breed)?`<br><br>⚠️ ${p.breed} es una raza braquicéfala (hocico corto): tienen mucho más riesgo de golpe de calor. Extrema precauciones.`:''}`},
+    {k:['ejercicio','pasear','paseo','cuanto caminar','actividad'],t:'ejercicio',
+     r:p=>{const age=+p.age||3;
+      const base = age<1?'2–3 salidas cortas al día (regla orientativa: 5 minutos por mes de edad, dos veces al día, para no dañar sus articulaciones en crecimiento)'
+        : age>=8?'2 paseos diarios de 20–30 min, suaves y a su ritmo'
+        : (p.activity==='alto'?'60–90 min diarios repartidos, sumando juego y olfateo':'45–60 min diarios en 2 salidas');
+      return `Para ${p.name}${p.age?` (${p.age} años`:''}${p.activity?`, actividad ${p.activity})`:p.age?')':''}: <b>${base}</b>.
+<br><br>El <b>olfateo</b> cansa más que correr: 15 minutos husmeando equivalen a un buen rato de ejercicio físico y bajan la ansiedad. Deja que huela.
+<br><br>Señales de que le falta ejercicio: destrucción, ladrido excesivo, inquietud nocturna, exceso de energía en casa.`;}},
+    {k:['banar','bañar','baño','bano','champu','shampoo','higiene'],t:'baño',
+     r:p=>`<b>Frecuencia:</b> cada 3–6 semanas en general. Bañarlo de más elimina la capa de grasa protectora y reseca la piel.
+<br><br>• Usa <b>siempre</b> champú para perros: el humano tiene un pH que les daña la piel.
+<br>• Agua tibia, secado completo (sobre todo en pliegues y orejas) para evitar hongos.
+<br>• Uñas: cada 3–4 semanas si no se desgastan solas. Si escuchas el "clic" al caminar, están largas.
+<br>• Dientes: cepillado idealmente diario con pasta canina.
+<br>• Orejas: revisar semanalmente; si hay mal olor o secreción oscura, consulta.`},
+    {k:['come pasto','comer pasto','come tierra','pica '],t:'pica',
+     r:p=>`Comer pasto es <b>común y no siempre patológico</b>: puede ser conducta normal, aburrimiento o intento de aliviar malestar.
+<br><br><b>Preocúpate si:</b> lo hace compulsivamente, vomita después de forma repetida, o come tierra/piedras (podría indicar déficit nutricional, anemia o pica).
+<br><br>⚠️ El riesgo mayor es el <b>pasto fumigado</b> con herbicidas o pesticidas. Evita jardines tratados.`},
+    {k:['come caca','coprofagia','propia caca','sus heces','excremento','caca','popo'],t:'coprofagia',
+     r:p=>`La coprofagia es desagradable pero frecuente. Causas: conducta aprendida de cachorro, dieta poco digestible, aburrimiento, o llamada de atención (si lo retas, refuerzas la conducta).
+<br><br><b>Manejo:</b> recoger de inmediato, enriquecer el ambiente, revisar que el alimento cubra sus necesidades, y descartar parásitos o malabsorción con el veterinario.
+<br><br>No lo castigues: aumenta el estrés y suele empeorarlo.`},
+    {k:['auto','viaje','viajar','avion','marea','transporte'],t:'viajes',
+     r:p=>`<b>Mareo en auto:</b> más común en cachorros (el oído interno aún madura). Viaja en ayuno de 4–6 h, con ventana algo abierta y paradas cada 2 h.
+<br><br><b>Seguridad:</b> siempre con arnés de seguridad homologado o transportín anclado — nunca suelto ni con la cabeza fuera de la ventana.
+<br><br><b>Viajes largos o avión:</b> necesitarás certificado de salud vigente, vacunas al día y, según destino, microchip. Consulta con anticipación los requisitos.`},
+    {k:['viejo','anciano','senior','envejec','edad avanzada','artros'],t:'senior',
+     r:p=>`${p.age&&+p.age>=7?`Con ${p.age} años, ${p.name} ya está en etapa senior. `:'Un perro se considera senior desde los 7 años (antes en razas grandes). '}Cambios esperables y qué hacer:
+<br><br>• <b>Movilidad:</b> artrosis frecuente. Paseos más cortos pero regulares, camas ortopédicas, evitar pisos resbalosos, control de peso.
+<br>• <b>Sentidos:</b> puede perder audición o visión; mantén los muebles en su lugar.
+<br>• <b>Cognición:</b> desorientación, cambios de sueño o ladrido nocturno pueden ser disfunción cognitiva — hay tratamiento, consúltalo.
+<br>• <b>Controles:</b> chequeo veterinario cada 6 meses con exámenes de sangre.
+<br><br>📊 Si notas cambios de conducta, la app te los muestra en el perfil emocional y puedes llevar el reporte PDF a la consulta.`},
+    {k:['ladra mucho','no para de ladrar','ladrido excesivo','como evitar que ladre'],t:'ladrido',
+     r:p=>`Primero identifica <b>la causa</b>, porque el manejo cambia: territorial (ventana/timbre), demanda de atención, alerta, aburrimiento o ansiedad.
+<br><br>• <b>Nunca grites</b>: el perro interpreta que lo acompañas.
+<br>• Si ladra por atención, ignora por completo hasta que se calle y recién ahí premia el silencio.
+<br>• Si es territorial, limita la vista a la calle y refuerza la calma cuando pasa el estímulo.
+<br>• Más ejercicio y olfateo reduce el ladrido por energía acumulada.
+<br><br>📊 Usa las <b>estadísticas</b> de la app: los horarios de mayor ladrido suelen revelar el gatillo.`},
     {k:['convuls','ataque','temblor','desmay','epilep'],t:'neurológico',urgent:['convuls','desmay'],
      r:p=>`⚠️ <b>Las convulsiones son una urgencia veterinaria.</b>
 <br><br><b>Durante el episodio:</b> no le pongas las manos en la boca, retira objetos alrededor, apaga luces y ruidos, y <b>cronometra la duración</b>.
@@ -902,7 +989,13 @@ ${p.age&&p.age>=7?`<br><br>A los ${p.age} años conviene un alimento senior con 
           + `<br><br>💡 Revisa más alimentos en 🍽️ <b>¿Puede comer?</b>`;
       }
     }
-    const hit=this.VET_KB.find(e=>e.k.some(k=>s.includes(k)));
+    // gana la coincidencia más específica (palabra clave más larga), no la primera del listado
+    let hit=null, hitLen=0;
+    for(const e of this.VET_KB){
+      for(const k of e.k){
+        if(s.includes(k) && k.length>hitLen){ hit=e; hitLen=k.length; }
+      }
+    }
     if(!hit){
       const c=this.vetContext();
       return `No tengo una guía específica para esa consulta, pero puedo orientarte con lo que sé de <b>${p.name}</b>:
