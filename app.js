@@ -193,6 +193,7 @@ const App = {
         ansioso:'😰 Ansioso',asustado:'😨 Asustado',dolor:'🤕 Posible malestar',territorio:'🛡️ Alerta',emocionado:'🤩 Emocionado'};
       mood = moodMap[top]; sub = `Basado en ${recent.length} evento(s) confirmados en 24 h`;
     }
+    const wb=document.getElementById('wbName'); if(wb&&p) wb.textContent=p.name;
     document.getElementById('moodValue').textContent = mood;
     document.getElementById('moodSub').textContent = sub;
     this.renderDaily();
@@ -1697,6 +1698,431 @@ ${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<tr><td>${SOUND_TY
     const dmax=Math.max(...days,1);
     document.getElementById('chartWeek').innerHTML=days.map((v,i)=>
       `<div class="bar" style="height:${v/dmax*100}%"><span class="bl">${names[i]}</span></div>`).join('');
+  },
+
+  /* ══════════ WRAPPED ANUAL ══════════ */
+  wr:{i:0, timer:null, slides:[], paused:false},
+
+  /* --- cálculo del año --- */
+  wrappedData(){
+    const p=this.state.pet; if(!p) return null;
+    const year=new Date().getFullYear();
+    const all=(this.state.events||[]).slice().sort((a,b)=>a.ts-b.ts);
+    let evs=all.filter(e=>new Date(e.ts).getFullYear()===year);
+    let scope='year';
+    if(!evs.length && all.length){ evs=all; scope='all'; }
+    const d={year, scope, name:p.name, breed:p.breed, photo:p.photo, evs, total:evs.length};
+
+    const byType={}, byMeaning={}, byDate={}, hours=Array(24).fill(0);
+    evs.forEach(e=>{
+      byType[e.type]=(byType[e.type]||0)+1;
+      const m=e.meaning||e.pred; if(m) byMeaning[m]=(byMeaning[m]||0)+1;
+      const dt=new Date(e.ts), key=dt.toDateString();
+      byDate[key]=(byDate[key]||0)+1;
+      hours[dt.getHours()]++;
+    });
+    const sortD=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]);
+    d.types=sortD(byType); d.meanings=sortD(byMeaning);
+    d.topType=d.types[0]?d.types[0][0]:null;
+    d.topMeaning=d.meanings[0]?d.meanings[0][0]:null;
+    d.hours=hours; d.peakHour=hours.indexOf(Math.max(...hours,0));
+    d.daysTracked=Object.keys(byDate).length;
+    const td=sortD(byDate)[0];
+    d.topDay=td?{date:new Date(td[0]), n:td[1]}:null;
+    d.first=evs.length?new Date(evs[0].ts):null;
+    d.night=evs.filter(e=>{const h=new Date(e.ts).getHours(); return h>=23||h<6;}).length;
+    d.nightPct=d.total?Math.round(d.night/d.total*100):0;
+    d.perDay=d.daysTracked?(d.total/d.daysTracked):0;
+    d.confirmed=evs.filter(e=>e.meaning).length;
+    const wp=evs.filter(e=>e.meaning&&e.pred);
+    d.accuracy=wp.length>=3?Math.round(wp.filter(e=>e.meaning===e.pred).length/wp.length*100):null;
+    // racha más larga de días consecutivos con registro
+    const keys=Object.keys(byDate).map(k=>new Date(k).setHours(0,0,0,0)).sort((a,b)=>a-b);
+    let best=keys.length?1:0, run=1;
+    for(let i=1;i<keys.length;i++){ run=(keys[i]-keys[i-1]===864e5)?run+1:1; if(run>best)best=run; }
+    d.streak=best;
+    // emociones del período
+    const ec={}; Object.keys(this.EMOS).forEach(k=>ec[k]=0);
+    evs.forEach(e=>{ const k=this.emoOf(e); if(k) ec[k]++; });
+    // "relajado" se infiere igual que en el dashboard: jornadas de baja actividad
+    ec.relajado=Object.values(byDate).filter(n=>n<=Math.max(1,d.perDay*0.4)).length;
+    d.emos=Object.entries(ec).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
+    d.emoTotal=d.emos.reduce((a,b)=>a+b[1],0);
+    d.topEmo=d.emos[0]?d.emos[0][0]:null;
+    d.topEmoPct=d.emoTotal?Math.round(d.emos[0][1]/d.emoTotal*100):0;
+    // salud del año
+    const inYear=s=>s&&new Date(s).getFullYear()===year;
+    d.vaccines=(this.state.vaccines||[]).filter(v=>scope==='all'||inYear(v.date)).length;
+    d.vacTypes=[...new Set((this.state.vaccines||[]).filter(v=>scope==='all'||inYear(v.date)).map(v=>v.type))];
+    d.carnet=(this.state.carnet||[]).length;
+    d.pain=byMeaning.dolor||0;
+    d.persona=this.wrappedPersona(d);
+    return d;
+  },
+
+  wrappedPersona(d){
+    const typePct=t=>{const r=d.types.find(x=>x[0]===t); return d.total&&r?Math.round(r[1]/d.total*100):0;};
+    if(typePct('aullido')>=30) return {emo:'🌙', name:'El Cantante de Medianoche',
+      txt:`El ${typePct('aullido')}% de lo que dijo ${d.name} fueron aullidos. Lo suyo no es hablar: es interpretar.`};
+    if(d.nightPct>=30) return {emo:'🦉', name:'El Filósofo Nocturno',
+      txt:`El ${d.nightPct}% de sus sonidos ocurrió entre las 23:00 y las 6:00. Piensa mejor de noche.`};
+    return {
+      territorio:{emo:'🛡️', name:'El Guardián',
+        txt:`Nadie pasó por la puerta sin que ${d.name} lo anunciara primero. Servicio de seguridad incluido.`},
+      jugar:{emo:'🎾', name:'El Eterno Cachorro',
+        txt:`Da lo mismo lo que diga el carnet: lo que más pidió ${d.name} este año fue jugar.`},
+      emocionado:{emo:'🎉', name:'El Entusiasta',
+        txt:`Para ${d.name} todo es la mejor noticia del día. Y vuelve a serlo mañana.`},
+      hambre:{emo:'🍖', name:'El Negociador Profesional',
+        txt:`${d.name} tiene un solo tema de conversación y lo defiende con una insistencia admirable.`},
+      salir:{emo:'🧭', name:'El Explorador',
+        txt:`La puerta fue su obsesión del año: afuera siempre está pasando algo mejor.`},
+      atencion:{emo:'🥺', name:'El Corazón Pegajoso',
+        txt:`Lo que más pidió ${d.name} no fue comida ni paseo. Fuiste tú.`},
+      ansioso:{emo:'💗', name:'El Alma Sensible',
+        txt:`${d.name} siente todo el doble. Este año te lo dijo muchas veces, y lo escuchaste.`},
+      asustado:{emo:'💗', name:'El Alma Sensible',
+        txt:`${d.name} siente todo el doble. Este año te lo dijo muchas veces, y lo escuchaste.`},
+      dolor:{emo:'🩺', name:'El Paciente Valiente',
+        txt:`${d.name} avisó cuando algo le molestaba. Haberlo escuchado a tiempo fue lo más importante del año.`},
+    }[d.topMeaning] || {emo:'🐾', name:'El Misterioso',
+      txt:`${d.name} todavía guarda secretos. Vamos a descifrarlos el próximo año.`};
+  },
+
+  /* --- armado de las tarjetas --- */
+  wrappedSlides(d){
+    const n=d.name, S=[];
+    const nf=v=>v.toLocaleString('es-CL');
+    const fecha=dt=>dt.toLocaleDateString('es-CL',{day:'numeric',month:'long'});
+    const diaSem=dt=>dt.toLocaleDateString('es-CL',{weekday:'long'});
+    const per=d.scope==='year'?`en ${d.year}`:'desde que se conocieron';
+    const avatar=d.photo?`<img src="${d.photo}" alt="">`:'🐶';
+
+    S.push({bg:'g1', html:`<div class="wr-in wr-center">
+      <div class="wr-avatar">${avatar}</div>
+      <p class="wr-kicker">DogTalk AI · Wrapped</p>
+      <h2 class="wr-hero">El ${d.year}<br>de ${n}</h2>
+      <p class="wr-sub">Un año escuchando lo que quiso decirte.</p>
+      <p class="wr-hint">Toca para avanzar · mantén presionado para pausar</p>
+    </div>`});
+
+    S.push({bg:'g2', html:`<div class="wr-in">
+      <p class="wr-kicker">Se hicieron entender</p>
+      <p class="wr-big">${nf(d.total)}</p>
+      <h3 class="wr-title">sonidos interpretados</h3>
+      <p class="wr-sub">A lo largo de <b>${d.daysTracked} día${d.daysTracked===1?'':'s'}</b> de registro, un promedio de <b>${d.perDay.toFixed(1)}</b> al día.</p>
+      ${d.first?`<p class="wr-foot-note">El primero fue el ${fecha(d.first)}. Desde ahí no paró.</p>`:''}
+    </div>`});
+
+    if(d.types.length){
+      const max=d.types[0][1];
+      S.push({bg:'g3', html:`<div class="wr-in">
+        <p class="wr-kicker">Su idioma</p>
+        <h3 class="wr-title">${n} habla en ${SOUND_TYPES[d.topType].label.toLowerCase()}s</h3>
+        <div class="wr-bars2">${d.types.map(([t,v])=>`
+          <div class="wr-b2"><span class="wr-b2l">${SOUND_TYPES[t].emoji} ${SOUND_TYPES[t].label}</span>
+          <div class="wr-b2t"><i style="--w:${Math.round(v/max*100)}%"></i></div>
+          <span class="wr-b2n">${Math.round(v/d.total*100)}%</span></div>`).join('')}</div>
+        <p class="wr-sub">${d.types.length>1
+          ? `Cada sonido tiene su intención: el ladrido reclama, el gemido pide, el aullido llama a distancia.`
+          : `Todavía no lo has escuchado en otros registros. El aullido y el gemido dicen cosas muy distintas.`}</p>
+      </div>`});
+    }
+
+    if(d.meanings.length){
+      const top=d.meanings.slice(0,3), max=top[0][1];
+      S.push({bg:'g4', html:`<div class="wr-in">
+        <p class="wr-kicker">Lo que más te pidió</p>
+        <h3 class="wr-title">${MEANINGS[d.topMeaning].emoji} ${MEANINGS[d.topMeaning].label}</h3>
+        <p class="wr-sub2">${Math.round(d.meanings[0][1]/d.total*100)}% de todo lo que dijo ${per}</p>
+        <div class="wr-rank">${top.map(([m,v],i)=>`
+          <div class="wr-rk"><span class="wr-rkn">${i+1}</span>
+          <span class="wr-rkl">${MEANINGS[m].emoji} ${MEANINGS[m].label}</span>
+          <div class="wr-b2t"><i style="--w:${Math.round(v/max*100)}%"></i></div>
+          <span class="wr-b2n">${v}</span></div>`).join('')}</div>
+      </div>`});
+    }
+
+    const hMax=Math.max(...d.hours,1);
+    const ph=d.peakHour;
+    const franja=ph<6?'de madrugada':ph<12?'en la mañana':ph<19?'en la tarde':'en la noche';
+    S.push({bg:'g5', html:`<div class="wr-in">
+      <p class="wr-kicker">Su hora punta</p>
+      <p class="wr-big">${String(ph).padStart(2,'0')}:00</p>
+      <h3 class="wr-title">es cuando más habla</h3>
+      <div class="wr-hours">${d.hours.map((v,i)=>
+        `<i class="${i===ph?'pk':''}" style="--h:${Math.max(4,Math.round(v/hMax*100))}%"></i>`).join('')}</div>
+      <p class="wr-sub">${n} se expresa sobre todo ${franja}.${d.nightPct>=15?` Y un ${d.nightPct}% de sus sonidos ocurrió entre las 23:00 y las 6:00, con la casa durmiendo.`:''}</p>
+    </div>`});
+
+    if(d.topDay){
+      S.push({bg:'g6', html:`<div class="wr-in">
+        <p class="wr-kicker">El día más hablador</p>
+        <h3 class="wr-hero2">${diaSem(d.topDay.date)}<br>${fecha(d.topDay.date)}</h3>
+        <p class="wr-big2">${d.topDay.n} sonidos</p>
+        <p class="wr-sub">Ese día ${n} tenía algo importante que decir. ${d.topDay.n>=d.perDay*2?'Habló más del doble de lo habitual.':'Un día movido.'}</p>
+      </div>`});
+    }
+
+    if(d.topEmo){
+      const E=this.EMOS[d.topEmo];
+      S.push({bg:'g7', html:`<div class="wr-in wr-center">
+        <p class="wr-kicker">Su emoción del año</p>
+        <div class="wr-emo">${E.emoji}</div>
+        <h3 class="wr-hero2">${E.label}</h3>
+        <p class="wr-sub2">${d.topEmoPct}% de su perfil emocional</p>
+        <div class="wr-chips">${d.emos.slice(0,4).map(([k,v])=>
+          `<span class="wr-chip">${this.EMOS[k].emoji} ${this.EMOS[k].label} ${Math.round(v/d.emoTotal*100)}%</span>`).join('')}</div>
+      </div>`});
+    }
+
+    S.push({bg:'g8', html:`<div class="wr-in">
+      <p class="wr-kicker">Constancia</p>
+      <p class="wr-big">${d.streak}</p>
+      <h3 class="wr-title">día${d.streak===1?'':'s'} seguidos escuchándolo</h3>
+      <div class="wr-mini">
+        <div><b>${d.daysTracked}</b><span>días con registro</span></div>
+        <div><b>${d.confirmed}</b><span>eventos que confirmaste</span></div>
+        ${d.accuracy!==null?`<div><b>${d.accuracy}%</b><span>acertó la IA</span></div>`:''}
+      </div>
+      <p class="wr-sub">${d.confirmed>0
+        ? `Cada vez que corregiste una interpretación, la IA de ${n} aprendió a entenderlo un poco mejor.`
+        : `Etiquetar lo que significó cada sonido es lo que hace que la IA aprenda el idioma propio de ${n}.`}</p>
+    </div>`});
+
+    if(d.vaccines||d.carnet||d.pain){
+      S.push({bg:'g9', html:`<div class="wr-in">
+        <p class="wr-kicker">Su salud</p>
+        <h3 class="wr-title">🩺 El año en el veterinario</h3>
+        <div class="wr-mini">
+          ${d.vaccines?`<div><b>${d.vaccines}</b><span>vacuna${d.vaccines===1?'':'s'} registrada${d.vaccines===1?'':'s'}</span></div>`:''}
+          ${d.carnet?`<div><b>${d.carnet}</b><span>documento${d.carnet===1?'':'s'} en el carnet</span></div>`:''}
+          ${d.pain?`<div><b>${d.pain}</b><span>aviso${d.pain===1?'':'s'} de molestia</span></div>`:''}
+        </div>
+        <p class="wr-sub">${d.pain
+          ? `${n} avisó ${d.pain} ${d.pain===1?'vez':'veces'} que algo no andaba bien. Esos son los sonidos que nunca hay que dejar pasar.`
+          : `Sin avisos de dolor ni malestar en el período. La mejor estadística del año.`}</p>
+      </div>`});
+    }
+
+    S.push({bg:'g10', html:`<div class="wr-in wr-center">
+      <p class="wr-kicker">Su personalidad del año</p>
+      <div class="wr-emo">${d.persona.emo}</div>
+      <h3 class="wr-hero2">${d.persona.name}</h3>
+      <p class="wr-sub">${d.persona.txt}</p>
+    </div>`});
+
+    S.push({bg:'g1', last:true, html:`<div class="wr-in wr-center">
+      <div class="wr-avatar sm">${avatar}</div>
+      <h3 class="wr-hero2">El ${d.year} de ${n}</h3>
+      <div class="wr-summary">
+        <div><b>${nf(d.total)}</b><span>sonidos</span></div>
+        <div><b>${String(d.peakHour).padStart(2,'0')}h</b><span>hora punta</span></div>
+        ${d.topEmo?`<div><b>${this.EMOS[d.topEmo].emoji}</b><span>${this.EMOS[d.topEmo].label}</span></div>`:''}
+        <div><b>${d.persona.emo}</b><span>${d.persona.name}</span></div>
+      </div>
+      <button class="wr-share" onclick="App.shareWrapped(event)">📤 Compartir su año</button>
+      <button class="wr-again" onclick="App.wrGo(0)">↺ Verlo de nuevo</button>
+    </div>`});
+
+    return S;
+  },
+
+  /* --- reproductor tipo historia --- */
+  openWrapped(){
+    if(!this.state.pet){ this.toast('Primero crea el perfil de tu mascota 🐶'); return; }
+    const d=this.wrappedData();
+    this._wrData=d;
+    const stage=document.getElementById('wrStage'), bars=document.getElementById('wrBars');
+    this.go('wrapped');
+    if(!d || d.total<5){
+      bars.innerHTML=''; bars.hidden=true;
+      const falta=5-(d?d.total:0);
+      stage.innerHTML=`<div class="wr-slide g1 on"><div class="wr-in wr-center">
+        <div class="wr-emo">🎁</div>
+        <h3 class="wr-hero2">Su Wrapped<br>se está cocinando</h3>
+        <p class="wr-sub">Necesitamos al menos 5 sonidos registrados para contar la historia del año. ${d&&d.total?`Llevas <b>${d.total}</b>.`:''} Faltan <b>${falta}</b>.</p>
+        <div class="wr-prog"><i style="--w:${Math.round(((d?d.total:0)/5)*100)}%"></i></div>
+        <button class="wr-share" onclick="App.closeWrapped();App.go('listen')">🎙️ Escuchar ahora</button>
+      </div></div>`;
+      return;
+    }
+    bars.hidden=false;
+    this.wr.slides=this.wrappedSlides(d);
+    stage.innerHTML=this.wr.slides.map((s,i)=>`<div class="wr-slide ${s.bg}" data-i="${i}">${s.html}</div>`).join('');
+    bars.innerHTML=this.wr.slides.map(()=>`<div class="wr-bar"><i></i></div>`).join('');
+    this.wrBind();
+    this.wrGo(0);
+  },
+
+  closeWrapped(){ clearTimeout(this.wr.timer); this.wr.timer=null; this.go('home'); },
+
+  wrGo(i){
+    const S=this.wr.slides; if(!S.length) return;
+    if(i<0) i=0;
+    if(i>=S.length){ i=S.length-1; }
+    this.wr.i=i; this.wr.paused=false;
+    document.querySelectorAll('#wrStage .wr-slide').forEach((el,k)=>el.classList.toggle('on',k===i));
+    document.querySelectorAll('#wrBars .wr-bar').forEach((b,k)=>{
+      const bar=b.firstElementChild;
+      bar.style.animation='none'; void bar.offsetWidth;
+      if(k<i) bar.style.width='100%';
+      else if(k>i) bar.style.width='0%';
+      else { bar.style.width=''; bar.style.animation=`wrFill ${this.WR_DUR}ms linear forwards`; }
+    });
+    clearTimeout(this.wr.timer);
+    if(S[i].last){ this.confetti(); return; }   // la última no avanza sola
+    this._wrT0=Date.now(); this._wrLeft=this.WR_DUR;
+    this.wr.timer=setTimeout(()=>this.wrGo(this.wr.i+1), this.WR_DUR);
+  },
+  WR_DUR:6000,
+
+  wrPause(){
+    if(this.wr.paused||!this.wr.timer) return;
+    this.wr.paused=true; clearTimeout(this.wr.timer); this.wr.timer=null;
+    this._wrLeft=Math.max(400, this._wrLeft-(Date.now()-this._wrT0));
+    const b=document.querySelectorAll('#wrBars .wr-bar')[this.wr.i];
+    if(b) b.firstElementChild.style.animationPlayState='paused';
+  },
+  wrResume(){
+    if(!this.wr.paused) return;
+    this.wr.paused=false;
+    const b=document.querySelectorAll('#wrBars .wr-bar')[this.wr.i];
+    if(b) b.firstElementChild.style.animationPlayState='running';
+    this._wrT0=Date.now();
+    this.wr.timer=setTimeout(()=>this.wrGo(this.wr.i+1), this._wrLeft);
+  },
+
+  wrBind(){
+    if(this._wrBound) return; this._wrBound=true;
+    const stage=document.getElementById('wrStage');
+    let t0=0, held=false, x0=0, hold=null;
+    const down=e=>{
+      if(e.target.closest('button')) return;
+      t0=Date.now(); held=false; x0=e.touches?e.touches[0].clientX:e.clientX;
+      hold=setTimeout(()=>{ held=true; this.wrPause(); }, 240);
+    };
+    const up=e=>{
+      if(e.target.closest('button')) return;
+      clearTimeout(hold);
+      if(held){ this.wrResume(); return; }
+      const x=e.changedTouches?e.changedTouches[0].clientX:e.clientX;
+      const w=stage.getBoundingClientRect();
+      if(Math.abs(x-x0)>60){ this.wrGo(this.wr.i+(x<x0?1:-1)); return; }
+      this.wrGo(this.wr.i + ((x-w.left)/w.width<0.3 ? -1 : 1));
+    };
+    stage.addEventListener('pointerdown',down);
+    stage.addEventListener('pointerup',up);
+    stage.addEventListener('pointercancel',()=>{clearTimeout(hold); this.wrResume();});
+    document.addEventListener('keydown',e=>{
+      if(!document.getElementById('screen-wrapped').classList.contains('active')) return;
+      if(e.key==='ArrowRight') this.wrGo(this.wr.i+1);
+      if(e.key==='ArrowLeft') this.wrGo(this.wr.i-1);
+      if(e.key==='Escape') this.closeWrapped();
+    });
+  },
+
+  /* --- tarjeta compartible (canvas 1080×1920) --- */
+  async shareWrapped(ev){
+    if(ev) ev.stopPropagation();
+    const d=this._wrData; if(!d) return;
+    this.wrPause();
+    this.toast('Preparando su tarjeta… 🎨');
+    try{ await document.fonts.ready; }catch(e){}
+    const canvas=await this.wrappedCard(d);
+    canvas.toBlob(async blob=>{
+      const file=new File([blob], `wrapped-${d.name.toLowerCase().replace(/\s+/g,'-')}-${d.year}.png`, {type:'image/png'});
+      const txt=`El ${d.year} de ${d.name}: ${d.total} sonidos interpretados. Es ${d.persona.name} ${d.persona.emo} · hecho con DogTalk AI`;
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        try{ await navigator.share({files:[file], text:txt}); this.toast('¡Compartido! 🐾'); }
+        catch(err){ if(err.name!=='AbortError') this.wrDownload(canvas, file.name); }
+      } else this.wrDownload(canvas, file.name);
+    },'image/png');
+  },
+  wrDownload(canvas, name){
+    const a=document.createElement('a');
+    a.download=name; a.href=canvas.toDataURL('image/png'); a.click();
+    this.toast('Tarjeta descargada 📥 Súbela a tus historias');
+  },
+
+  wrappedCard(d){
+    const W=1080,H=1920, c=document.createElement('canvas');
+    c.width=W; c.height=H;
+    const x=c.getContext('2d');
+    const g=x.createLinearGradient(0,0,W*.4,H);
+    g.addColorStop(0,'#FF6B4A'); g.addColorStop(.45,'#9B5DE5'); g.addColorStop(1,'#2EC4B6');
+    x.fillStyle=g; x.fillRect(0,0,W,H);
+    // huellitas decorativas
+    x.globalAlpha=.09; x.fillStyle='#fff';
+    const paw=(px,py,s)=>{
+      x.beginPath(); x.ellipse(px,py,7*s,9*s,0,0,7); x.fill();
+      [[-12,-12],[-2,-17],[8,-15],[14,-6]].forEach(([ox,oy])=>{
+        x.beginPath(); x.ellipse(px+ox*s,py+oy*s,3.5*s,4.5*s,0,0,7); x.fill();
+      });
+    };
+    for(let i=0;i<26;i++) paw(Math.random()*W, Math.random()*H, 1.6+Math.random()*2.2);
+    x.globalAlpha=1;
+
+    const center=(t,y,font,col='#fff')=>{ x.font=font; x.fillStyle=col; x.textAlign='center'; x.fillText(t,W/2,y); };
+    const F=(w,s)=>`${w} ${s}px 'Baloo 2', 'Nunito', system-ui, sans-serif`;
+    const Fb=(w,s)=>`${w} ${s}px 'Nunito', system-ui, sans-serif`;
+
+    // ajusta el cuerpo para que un nombre largo no se salga de la tarjeta
+    const fit=(t,size,maxW,mk)=>{ let s=size; x.font=mk(800,s);
+      while(x.measureText(t).width>maxW && s>28){ s-=4; x.font=mk(800,s); } return mk(800,s); };
+    center('DOGTALK AI · WRAPPED', 130, Fb(800,34), 'rgba(255,255,255,.75)');
+    center(`El ${d.year} de`, 250, F(700,64));
+    center(d.name, 350, fit(d.name,96,W-160,F));
+
+    // dato principal
+    x.globalAlpha=.14; x.fillStyle='#fff';
+    this.wrRoundRect(x, 90, 430, W-180, 250, 44); x.fill(); x.globalAlpha=1;
+    center(d.total.toLocaleString('es-CL'), 570, F(800,132));
+    center('sonidos interpretados', 640, Fb(700,40), 'rgba(255,255,255,.85)');
+
+    // fila de datos
+    const cells=[
+      [String(d.peakHour).padStart(2,'0')+'h','su hora punta'],
+      [d.topMeaning?MEANINGS[d.topMeaning].emoji:'🐾', d.topMeaning?MEANINGS[d.topMeaning].label.toLowerCase():'—'],
+      [d.topEmo?this.EMOS[d.topEmo].emoji:'😊', d.topEmo?this.EMOS[d.topEmo].label.toLowerCase():'—'],
+    ];
+    cells.forEach((cell,i)=>{
+      const cx=W/2+(i-1)*310;
+      x.globalAlpha=.14; x.fillStyle='#fff';
+      this.wrRoundRect(x, cx-140, 740, 280, 240, 40); x.fill(); x.globalAlpha=1;
+      x.textAlign='center'; x.fillStyle='#fff'; x.font=F(800,78); x.fillText(cell[0], cx, 850);
+      x.font=Fb(700,28); x.fillStyle='rgba(255,255,255,.85)';
+      x.fillText(cell[1].length>14?cell[1].slice(0,13)+'…':cell[1], cx, 920);
+    });
+
+    // personalidad
+    x.globalAlpha=.16; x.fillStyle='#fff';
+    this.wrRoundRect(x, 90, 1040, W-180, 470, 48); x.fill(); x.globalAlpha=1;
+    center('SU PERSONALIDAD DEL AÑO', 1120, Fb(800,30), 'rgba(255,255,255,.8)');
+    center(d.persona.emo, 1265, F(400,120));
+    center(d.persona.name, 1360, fit(d.persona.name,64,W-220,F));
+    this.wrWrap(x, d.persona.txt, W/2, 1425, W-260, 44, Fb(600,32), 'rgba(255,255,255,.9)');
+
+    // pie
+    center(`${d.daysTracked} días escuchándolo · ${d.streak} seguidos`, 1640, Fb(700,36));
+    center('🐾', 1740, F(400,64));
+    center('Hecho con DogTalk AI', 1820, Fb(800,34), 'rgba(255,255,255,.8)');
+    return Promise.resolve(c);
+  },
+  wrRoundRect(x,px,py,w,h,r){
+    x.beginPath();
+    x.moveTo(px+r,py); x.arcTo(px+w,py,px+w,py+h,r); x.arcTo(px+w,py+h,px,py+h,r);
+    x.arcTo(px,py+h,px,py,r); x.arcTo(px,py,px+w,py,r); x.closePath();
+  },
+  wrWrap(x,text,cx,cy,maxW,lh,font,col){
+    x.font=font; x.fillStyle=col; x.textAlign='center';
+    const words=text.split(' '); let line='', y=cy;
+    words.forEach(w=>{
+      const t=line?line+' '+w:w;
+      if(x.measureText(t).width>maxW){ x.fillText(line,cx,y); y+=lh; line=w; }
+      else line=t;
+    });
+    if(line) x.fillText(line,cx,y);
   },
 
   /* ---------- util ---------- */

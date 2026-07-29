@@ -115,6 +115,11 @@
       <span class="tb-txt">¿Qué intenta decir mi perro?<small>Traducción en tiempo real · 10 segundos</small></span>
       <span class="tb-arrow">›</span>
     </button>
+    <button class="wrapped-banner" onclick="App.openWrapped()">
+      <span class="wb-ico">🎁</span>
+      <span class="wb-txt">El año de <b id="wbName">tu perro</b><small>Su Wrapped anual · listo para compartir</small></span>
+      <span class="tb-arrow">›</span>
+    </button>
     <div class="predict-card" id="predictCard" onclick="App.go('stats')">
       <span class="predict-ico">🔮</span>
       <div><p class="predict-title">Predicción de necesidades</p><p class="predict-text" id="predictText">Aprendiendo la rutina…</p></div>
@@ -309,6 +314,7 @@
     <div class="chart-h" id="chartMeanings"></div>
     <h3 class="section-title">Patrón semanal</h3>
     <div class="chart" id="chartWeek"></div>
+    <button class="btn-primary report-btn wrapped-btn" onclick="App.openWrapped()">🎁 Ver su Wrapped anual</button>
     <button class="btn-primary report-btn" onclick="App.generateReport()">📄 Generar reporte mensual PDF</button>
     <p class="report-hint">Ideal para llevar al veterinario · Incluido en Premium</p>
   </div>
@@ -397,6 +403,13 @@
   <p class="pay-secure">🔒 DogTalk AI nunca almacena el número completo de tu tarjeta. Los datos se procesan y guardan en la pasarela certificada PCI-DSS.</p>
   <button class="btn-ghost" onclick="App.closePaySheet()">Cancelar</button>
 </div>
+
+<!-- WRAPPED ANUAL -->
+<section id="screen-wrapped" class="screen">
+  <div class="wr-bars" id="wrBars"></div>
+  <button class="wr-close" onclick="App.closeWrapped()" aria-label="Cerrar">✕</button>
+  <div class="wr-stage" id="wrStage"></div>
+</section>
 
 <!-- CONFIGURACIÓN -->
 <section id="screen-settings" class="screen">
