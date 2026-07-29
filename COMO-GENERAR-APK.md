@@ -1,86 +1,68 @@
 # 📱 Cómo obtener la app en tu teléfono — DogTalk AI
 
-Tres rutas, de la más rápida a la más completa.
+## ✅ Ruta 1 — Descargar la APK ya compilada (recomendada)
 
----
+La APK se compila **sola en la nube** (GitHub Actions) cada vez que se genera una versión.
+No necesitas Android Studio, Java ni SDK en el notebook.
 
-## ✅ Ruta 1 — Instalarla YA como PWA (0 minutos, sin compilar)
+**Descarga directa desde el teléfono:**
+👉 https://github.com/tcallealta-oss/dogtalk-ai/releases/latest
 
-La app ya es una **PWA instalable**. En Android queda con su icono en el escritorio, a pantalla
-completa y sin barra del navegador — se ve y se usa igual que una app nativa.
+1. Abre ese link en el navegador del celular
+2. Descarga `DogTalk-AI.apk`
+3. Ábrela → Android pide permitir *"instalar apps de esta fuente"* → aceptar
+4. Al primer uso concede **micrófono** y **cámara**
 
-1. Publica la carpeta en cualquier hosting con HTTPS (obligatorio para PWA):
-   - **Netlify Drop**: arrastra la carpeta a https://app.netlify.com/drop → te da una URL al instante
-   - **Vercel**: `npx vercel --prod` dentro de la carpeta
-   - **GitHub Pages**: sube la carpeta a un repo y activa Pages
-2. Abre esa URL en **Chrome del teléfono**
-3. Menú ⋮ → **"Instalar aplicación"** (o aparece solo el botón 📲 Instalar app)
+### Generar una versión nueva (después de cambiar el código)
 
-**Ventaja:** funciona hoy, se actualiza sola al publicar cambios, no necesita Play Store.
-**Limitación:** el micrófono solo escucha con la app abierta (no en segundo plano).
-
----
-
-## 📦 Ruta 2 — APK sin instalar nada (PWABuilder, ~10 min)
-
-Microsoft ofrece un servicio gratuito que convierte una PWA en APK firmada.
-
-1. Publica la app con HTTPS (paso 1 de la Ruta 1)
-2. Entra a **https://www.pwabuilder.com**
-3. Pega tu URL → *Start* → pestaña **Android** → **Generate Package**
-4. Descargas un `.zip` con:
-   - `app-release-signed.apk` ← **esta es tu APK**, instalable directo
-   - `.aab` para subir a Google Play
-   - La clave de firma (guárdala, la necesitas para futuras actualizaciones)
-
-**Es la ruta más rápida para tener un archivo APK real en la mano.**
-
----
-
-## 🛠️ Ruta 3 — Compilar localmente con Capacitor (control total)
-
-Necesario si más adelante quieres **escucha en segundo plano**, notificaciones push nativas
-o publicar en Play Store con funciones nativas.
-
-### Requisitos (instalar una vez, ~8 GB)
-- **Android Studio**: https://developer.android.com/studio (incluye SDK y Gradle)
-- **JDK 17**: viene con Android Studio
-
-### Comandos (dentro de esta carpeta)
 ```bash
-npm install
-npx cap init "DogTalk AI" cl.dogtalk.app --web-dir=.
-npx cap add android
-npx cap sync android
+git push
+gh workflow run apk.yml --ref main
 ```
 
-Generar la APK de prueba:
+Tarda ~2 minutos. Para ver el avance y la nueva URL:
+
 ```bash
-cd android && gradlew.bat assembleDebug
+gh run watch --exit-status && gh release view --web
 ```
-→ queda en `android/app/build/outputs/apk/debug/app-debug.apk`
 
-O abrir en Android Studio para firmar la versión de producción:
-```bash
-npx cap open android
-```
-→ *Build → Generate Signed Bundle / APK*
+### Qué hace el workflow (`.github/workflows/apk.yml`)
 
-### Permisos que debes agregar en `android/app/src/main/AndroidManifest.xml`
-```xml
-<uses-permission android:name="android.permission.RECORD_AUDIO" />
-<uses-permission android:name="android.permission.CAMERA" />
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-```
+| Paso | Qué resuelve |
+|---|---|
+| `scripts/build-web.js` | Copia a `www/` solo los archivos de la app (sin `node_modules`, `.git` ni `android/`) |
+| `npx cap add android` | Genera el proyecto Android desde cero en el runner |
+| `scripts/android-permissions.js` | Inyecta `RECORD_AUDIO`, `CAMERA`, `POST_NOTIFICATIONS`, `MODIFY_AUDIO_SETTINGS` y `VIBRATE` en el AndroidManifest — sin esto `getUserMedia` falla dentro de la WebView |
+| `gradlew assembleDebug` | Compila la APK firmada con la clave de debug (instalable en cualquier teléfono) |
+| `gh release create` | La publica como descarga pública |
 
 ---
 
-## 🎯 Recomendación
+## 📲 Ruta 2 — Instalarla como PWA (sin APK)
 
-Para **probarla en tu teléfono hoy** → Ruta 1.
-Para **tener el archivo .apk y compartirlo** → Ruta 2.
-Para **publicar en Play Store con funciones nativas** → Ruta 3.
+La app también es una PWA instalable, servida en
+**https://tcallealta-oss.github.io/dogtalk-ai/**
 
-> Nota: la compilación de la APK no se puede hacer en este equipo porque no tiene
-> Android SDK ni Java instalados. Las rutas 1 y 2 no los necesitan.
+Chrome del teléfono → menú ⋮ → **Instalar aplicación**.
+Queda con icono propio y a pantalla completa, y **se actualiza sola** con cada `git push`.
+
+Diferencia con la APK: la PWA no puede pedir permisos nativos persistentes ni,
+más adelante, escuchar en segundo plano.
+
+---
+
+## 🏪 Ruta 3 — Publicar en Google Play
+
+Para la tienda hace falta un **AAB firmado con clave propia** (no la de debug):
+
+1. Generar el keystore una vez:
+   ```bash
+   keytool -genkey -v -keystore dogtalk.jks -keyalg RSA -keysize 2048 -validity 10000 -alias dogtalk
+   ```
+2. Cargarlo como secreto del repositorio (`KEYSTORE_BASE64`, `KEYSTORE_PASS`, `KEY_ALIAS`)
+3. Cambiar en el workflow `assembleDebug` por `bundleRelease` y firmar con esos secretos
+4. Subir el `.aab` a Play Console (cuenta de desarrollador: USD 25, pago único)
+
+> La compilación local con Android Studio sigue siendo posible (`npm install`,
+> `npm run build:web`, `npx cap add android`, `npx cap open android`), pero pide
+> ~8 GB de herramientas en el notebook. La ruta 1 evita todo eso.
